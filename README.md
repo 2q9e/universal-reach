@@ -4,6 +4,8 @@ Universal Reach is a local, read-only CLI and Model Context Protocol (MCP) serve
 
 The project catalogs all 35 requested platforms and implements adapters for 19 platform IDs; Discord can be activated separately with an explicit channel allowlist. Some adapters require approved, owner-authorized tokens. The catalog distinguishes working adapters from restricted and not-yet-implemented platforms. It does not claim that a listed platform is fully supported.
 
+Anonymous access means a request works without a user account, API key or token, or browser session cookie. A public API endpoint or feed is valid for this path when it is accessible without those credentials and its published terms permit the use. Separately marked, opt-in authenticated adapters add authorized functionality where a platform does not offer an anonymous route.
+
 ## Architecture
 
 The CLI and stdio MCP server share one `ReachService` and a capability registry. Platform-specific adapters live under `src/universal_reach/adapters/`; they normalize responses into common records and use the shared bounded HTTP client. The JSON config stores public instance URLs and logging preferences only. Optional OAuth, PAT, and bot credentials are read from environment variables when an operation needs them. There is no browser automation backend or Universal Reach cloud service.
@@ -141,7 +143,7 @@ The table describes operations present in this source release. A check means an 
 | XDA Forums | Planned | — | — | — | — | — | No first-party feed/API permission verified; third-party listing only |
 | V2EX | Partial | — | ✓ | ✓ | ✓ | — | Public profile route is anonymous; topic and replies routes require V2EX_ACCESS_TOKEN |
 | Zhihu | Restricted | — | — | — | — | — | Official search requires Access Secret and timestamp; response contract/quota not verified |
-| Baidu Tieba | Planned | — | — | — | — | — | Not verified |
+| Baidu Tieba | Restricted | — | — | — | — | — | Official API is partner/application-based; no complete anonymous retrieval contract |
 | ResetEra | Restricted | — | — | — | — | — | Terms restrict automated retrieval; announced RSS is limited to a specific staff feed |
 | Lemmy | Partial | ✓ | ✓ | ✓ | — | — | Yes, on public configured instances |
 | Discourse forums | Partial | ✓ | ✓ | ✓ | — | — | Yes, on public configured instances |
@@ -151,18 +153,18 @@ The table describes operations present in this source release. A check means an 
 | Facebook | Restricted | — | — | — | — | ✓ | Configured Page token, `pages_read_engagement`, `pages_read_user_content`, and Page `MODERATE` task; approximately 600 ranked published posts/year |
 | Instagram | Restricted | — | — | — | ✓ | ✓ | Configured professional account only; Graph API scopes and app access apply; at most 10,000 recent media items |
 | YouTube | Partial | — | — | — | — | ✓ | Anonymous recent channel Atom feed; broader Data API access requires a Google API key |
-| WhatsApp | Planned | — | — | — | — | — | No public read API verified |
+| WhatsApp | Restricted | — | — | — | — | — | Channel updates are public to visitors, but no automated public API/feed was verified; Business API requires a bearer token |
 | TikTok | Partial | — | — | — | ✓ | ✓ | OAuth token for the owner account; Display API scopes and app approval required |
-| WeChat | Planned | — | — | — | — | — | Not verified |
+| WeChat | Restricted | — | — | — | — | — | Official account API requires onboarding, IP allowlisting, app credentials, and access tokens |
 | Telegram | Partial | — | ✓ | — | ✓ | ✓ | Anonymous public channel previews; hidden posts and groups are unsupported |
-| Snapchat | Restricted | — | — | — | — | — | Public Profile API is allowlisted and token-based |
-| Douyin | Restricted | — | — | — | — | — | Official access requires OAuth and app credentials |
-| Kuaishou | Restricted | — | — | — | — | — | Official access requires app credentials and tokens |
-| Weibo | Planned | — | — | — | — | — | Not verified |
+| Snapchat | Restricted | — | — | — | — | — | Public Profile API requires an allowlisted app and bearer token; Developer Terms prohibit search-engine/directory use |
+| Douyin | Restricted | — | — | — | — | — | Search is experimental/approval-gated, requires app credentials, and has restrictive result-use terms |
+| Kuaishou | Restricted | — | — | — | — | — | Documented video routes require OAuth and are account-scoped; no anonymous public search verified |
+| Weibo | Restricted | — | — | — | — | — | Official CLI requires developer verification, OAuth, and trial/paid access; automated collection needs prior permission |
 | Pinterest | Restricted | — | — | — | — | — | App review and OAuth required; reads are account-scoped and public search is not documented |
 | X / Twitter | Partial | ✓ | ✓ | — | — | — | App-only Bearer token and explicit paid-read opt-in; recent search covers seven days |
 | Threads | Restricted | — | ✓ | ✓ | ✓ | ✓ | OAuth token owner's profile/posts; replies require `threads_read_replies`; exact reads require numeric API ID |
-| LinkedIn | Restricted | — | — | — | — | — | OAuth and product access required |
+| LinkedIn | Restricted | — | — | — | — | — | OAuth and vetted product access required; general public post search is unavailable |
 | Discord | Restricted* | — | ✓ | ✓ | — | — | Bot token, channel allowlist, and permissions required; content may be suppressed without privileged intent |
 | Bluesky | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes through public AppView GET endpoints |
 
@@ -249,6 +251,14 @@ Adapter routes and access declarations are based on the platforms' published doc
 - [Instagram Platform overview](https://developers.facebook.com/documentation/instagram-platform/overview) and [IG User Media](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media)
 - [Meta Threads API collection](https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api), which describes the token-owner and reply endpoints used by the adapter
 - [TikTok Display API overview](https://developers.tiktok.com/docs/en/display-api-overview), [Get user info](https://developers.tiktok.com/docs/en/tiktok-api-v2-get-user-info), [List videos](https://developers.tiktok.com/docs/en/tiktok-api-v2-video-list), and [error handling](https://developers.tiktok.com/docs/en/tiktok-api-v2-error-handling)
+- [Baidu Tieba Open API](https://tieba.baidu.com/tb/zt/tiebaapi/index.html) and [client agreement](https://tieba.baidu.com/tb/eula.html)
+- [WhatsApp Channel visibility](https://faq.whatsapp.com/699347952293912/?cms_platform=web&helpref=uf_share), [Business Platform](https://developers.facebook.com/documentation/business-messaging/whatsapp/overview), and [Terms](https://www.whatsapp.com/legal/terms-of-service?mainArticle=true)
+- [Tencent Cloud WeChat Open Platform documentation](https://cloud.tencent.com/document/product/1301/100187)
+- [Weibo CLI quickstart](https://open.weibo.com/cli/quickstart) and [service agreement](https://www.weibo.com/signup/v5/protocol/)
+- [Snapchat Public Profile API](https://developers.snap.com/marketing-api/Public-Profile-API/GetStarted), [Creator Discovery](https://developers.snap.com/marketing-api/Public-Profile-API/CreatorDiscovery), and [Developer Terms](https://www.snap.com/terms/developer)
+- [Douyin search capability](https://developer.open-douyin.com/docs/resource/zh-CN/dop/ability/search-management/item-search), [search API](https://developer.open-douyin.com/docs/resource/zh-CN/dop/develop/openapi/douyin-search-capability/aweme-dy-video-search/), and [platform agreement](https://developer.open-douyin.com/docs/resource/zh-CN/developer/operation-norm/platform-protocol/register-protocol)
+- [Kuaishou website app authorization](https://open.kuaishou.com/platformDocs/develop/web-app), [video API](https://open.kuaishou.com/platformDocs/openAbility/contentManagement/searchForVideos.html), and [application management rules](https://open.kuaishou.com/platformDocs/newGuide/applicationManagementSpecifica.html)
+- [LinkedIn OAuth](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authentication), [Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api?tabs=curl&view=li-lms-2026-04), [Community Management access](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/community-management-overview?view=li-lms-2026-08), and [API Terms](https://www.linkedin.com/legal/l/api-terms-of-use)
 
 ## Contributing
 
