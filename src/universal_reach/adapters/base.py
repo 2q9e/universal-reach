@@ -59,6 +59,7 @@ class Adapter:
             status="degraded",
             operations=list(self.capability.operations),
             message="This adapter does not implement a live health check.",
+            access_mode="unknown",
         )
 
 

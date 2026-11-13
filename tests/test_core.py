@@ -137,6 +137,9 @@ async def test_health_check_reaches_each_adapter_and_uses_configured_instances(m
     assert {row["platform"] for row in result["results"] if row["status"] == "degraded"} == {
         "reddit", "x", "facebook", "instagram", "threads", "tiktok",
     }
+    for row in result["results"]:
+        if row["platform"] in {"facebook", "instagram", "threads", "tiktok"}:
+            assert row["access_mode"] == "unknown"
     assert any(url == "https://lemmy.example/api/v4/search" and kwargs["public_instance"] is True for url, kwargs in calls)
     assert any(url == "https://discourse.example/latest.json" and kwargs["public_instance"] is True for url, kwargs in calls)
 
