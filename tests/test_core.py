@@ -7,7 +7,7 @@ import os
 import pytest
 
 from universal_reach.adapters.factory import build_registry
-from universal_reach.adapters import bluesky, bogleheads, forem, github, hackernews, public_forums, reddit, stackexchange, telegram, v2ex, youtube
+from universal_reach.adapters import bluesky, bogleheads, discord, forem, github, hackernews, public_forums, reddit, stackexchange, telegram, v2ex, x, youtube
 from universal_reach.config import load_config, save_config
 from universal_reach.errors import PlatformNotImplemented, ReachError
 from universal_reach.mcp_server import create_mcp_server
@@ -15,20 +15,31 @@ from universal_reach.security import validate_https_url, validate_public_instanc
 from universal_reach.service import ReachService, validate_limit, validate_query
 
 
-def test_platform_catalog_and_loaded_adapters_are_truthful() -> None:
+def test_platform_catalog_and_loaded_adapters_are_truthful(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DISCORD_ALLOWED_CHANNEL_IDS", raising=False)
     registry = build_registry()
     catalog = registry.capabilities()
 
     assert len(catalog) == 35
     assert len({item["id"] for item in catalog}) == 35
     implemented = [item for item in catalog if item["operations"]]
-    assert len(implemented) == 14
+    assert len(implemented) == 15
     assert {item["id"] for item in implemented} == {
         "github", "stackoverflow", "stackexchange", "hackernews", "v2ex",
-        "bogleheads", "reddit", "telegram", "youtube", "4chan", "lemmy",
+        "bogleheads", "reddit", "telegram", "youtube", "x", "4chan", "lemmy",
         "discourse", "devto", "bluesky",
     }
     assert all(item["status"] == "partial" for item in implemented)
+
+
+def test_discord_adapter_requires_explicit_channel_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCORD_ALLOWED_CHANNEL_IDS", "222222222222222222,333333333333333333")
+    registry = build_registry()
+
+    discord_capability = next(item for item in registry.capabilities() if item["id"] == "discord")
+    assert discord_capability["status"] == "partial"
+    assert discord_capability["operations"] == ("read", "replies")
+    assert "discord" in registry.implemented_platforms()
     assert "search" not in registry.get("hackernews").capability.operations
 
 
@@ -64,6 +75,7 @@ async def test_status_does_not_claim_live_health_and_lists_all_platforms() -> No
 
 @pytest.mark.asyncio
 async def test_health_check_reaches_each_adapter_and_uses_configured_instances(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DISCORD_ALLOWED_CHANNEL_IDS", raising=False)
     calls: list[tuple[str, dict[str, object]]] = []
 
     async def github_json(url: str, **kwargs: object) -> object:
@@ -120,11 +132,26 @@ async def test_health_check_reaches_each_adapter_and_uses_configured_instances(m
     result = await service.health_check()
 
     assert result["healthy"] is False
-    assert len(result["results"]) == 14
+    assert len(result["results"]) == 15
     assert sum(row["status"] == "available" for row in result["results"]) == 13
-    assert next(row for row in result["results"] if row["platform"] == "reddit")["status"] == "degraded"
+    assert {row["platform"] for row in result["results"] if row["status"] == "degraded"} == {"reddit", "x"}
     assert any(url == "https://lemmy.example/api/v4/search" and kwargs["public_instance"] is True for url, kwargs in calls)
     assert any(url == "https://discourse.example/latest.json" and kwargs["public_instance"] is True for url, kwargs in calls)
+
+
+@pytest.mark.asyncio
+async def test_real_mcp_client_protocol_round_trip() -> None:
+    from mcp import Client
+
+    server = create_mcp_server(ReachService(build_registry(), config={}))
+    async with Client(server, mode="legacy") as client:
+        tools = await client.list_tools()
+        result = await client.call_tool("platform_status", {"platform": "youtube"})
+
+    assert "platform_status" in {tool.name for tool in tools.tools}
+    assert result.is_error is False
+    assert result.structured_content["platforms"][0]["platform"] == "youtube"
+    assert result.structured_content["platforms"][0]["status"] == "degraded"
 
 
 @pytest.mark.asyncio

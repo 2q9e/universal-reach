@@ -2,7 +2,7 @@
 
 Universal Reach is a local, read-only CLI and Model Context Protocol (MCP) server for retrieving public content from supported social platforms and online communities. It makes direct requests to documented public APIs; there is no Universal Reach cloud service.
 
-The project catalogs all 35 requested platforms and currently implements partial adapters for 14 platform IDs. The catalog distinguishes working adapters from restricted and not-yet-implemented platforms. It does not claim that a listed platform is fully supported.
+The project catalogs all 35 requested platforms and currently implements partial adapters for 15 platform IDs; Discord can be activated separately with an explicit channel allowlist. The catalog distinguishes working adapters from restricted and not-yet-implemented platforms. It does not claim that a listed platform is fully supported.
 
 ## Architecture
 
@@ -12,7 +12,7 @@ The CLI and stdio MCP server share one `ReachService` and a capability registry.
 
 - One Python package, CLI, and stdio MCP server.
 - Structured, normalized records with explicit pagination, access mode, and partial-result metadata.
-- Read-only anonymous adapters, plus opt-in Reddit OAuth and V2EX Personal Access Token reads.
+- Read-only anonymous adapters, plus opt-in Reddit OAuth, V2EX Personal Access Token, X app-only reads, and an allowlisted Discord bot.
 - Host allowlists, HTTPS-only requests, redirect checks, bounded timeouts and retries, input validation, and safe error messages.
 - Configurable public Lemmy and Discourse instances, with DNS checks that reject private or non-global addresses.
 - No browser cookies or account passwords are used. Reddit requires prior platform approval; Reddit and V2EX credentials are read from environment variables and never stored in the local JSON configuration.
@@ -118,22 +118,22 @@ The table describes operations present in this source release. A check means an 
 | Platform | Status | Search | Read | Replies | Profile | Profile posts | Anonymous access |
 |---|---|---:|---:|---:|---:|---:|---|
 | Reddit | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | No anonymous access; OAuth adapter sends no request without explicit Reddit approval and app configuration |
-| Quora | Planned | — | — | — | — | — | Not verified |
+| Quora | Restricted | — | — | — | — | — | No verified anonymous API; partner data feed requires pricing and use-case approval |
 | Stack Overflow | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; Stack Exchange API quota and paging rules apply |
 | Stack Exchange | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; select `options.site` |
 | GitHub | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; unauthenticated rate limits apply |
 | Steam Community | Restricted | — | — | — | — | — | No documented public discussions route; automated HTML reading is excluded |
-| 4chan | Partial | Limited* | ✓ | ✓ | — | — | Yes; public JSON API |
+| 4chan | Partial | Limited† | ✓ | ✓ | — | — | Yes; public JSON API |
 | Hacker News | Partial | — | ✓ | ✓ | ✓ | ✓ | Yes; official Firebase API |
-| XDA Forums | Planned | — | — | — | — | — | Not verified |
+| XDA Forums | Planned | — | — | — | — | — | No first-party feed/API permission verified; third-party listing only |
 | V2EX | Partial | — | ✓ | ✓ | ✓ | — | Public profile route is anonymous; topic and replies routes require V2EX_ACCESS_TOKEN |
-| Zhihu | Planned | — | — | — | — | — | Not verified |
+| Zhihu | Restricted | — | — | — | — | — | Official search requires Access Secret and timestamp; response contract/quota not verified |
 | Baidu Tieba | Planned | — | — | — | — | — | Not verified |
-| ResetEra | Planned | — | — | — | — | — | Not verified |
+| ResetEra | Restricted | — | — | — | — | — | Terms restrict automated retrieval; announced RSS is limited to a specific staff feed |
 | Lemmy | Partial | ✓ | ✓ | ✓ | — | — | Yes, on public configured instances |
 | Discourse forums | Partial | ✓ | ✓ | ✓ | — | — | Yes, on public configured instances |
 | DEV Community | Partial | ✓ | ✓ | — | ✓ | ✓ | Yes for implemented public Forem routes |
-| Indie Hackers | Planned | — | — | — | — | — | Not verified |
+| Indie Hackers | Restricted | — | — | — | — | — | Terms prohibit automated crawling/scraping; no official feed found |
 | Bogleheads | Partial | — | ✓ | — | — | — | Anonymous exact-post reads only when the post is in the bounded topic Atom feed |
 | Facebook | Restricted | — | — | — | — | — | Official content access requires authorized API access |
 | Instagram | Restricted | — | — | — | — | — | Official API access is account- and permission-scoped |
@@ -146,14 +146,14 @@ The table describes operations present in this source release. A check means an 
 | Douyin | Restricted | — | — | — | — | — | Official access requires OAuth and app credentials |
 | Kuaishou | Restricted | — | — | — | — | — | Official access requires app credentials and tokens |
 | Weibo | Planned | — | — | — | — | — | Not verified |
-| Pinterest | Restricted | — | — | — | — | — | Official API requires OAuth authorization |
-| X / Twitter | Restricted | — | — | — | — | — | Developer app and bearer token required |
+| Pinterest | Restricted | — | — | — | — | — | App review and OAuth required; reads are account-scoped and public search is not documented |
+| X / Twitter | Partial | ✓ | ✓ | — | — | — | App-only Bearer token and explicit paid-read opt-in; recent search covers seven days |
 | Threads | Restricted | — | — | — | — | — | Meta app authorization and scopes required |
 | LinkedIn | Restricted | — | — | — | — | — | OAuth and product access required |
-| Discord | Restricted | — | — | — | — | — | Bot authorization and channel permissions required |
+| Discord | Restricted* | — | ✓ | ✓ | — | — | Bot token, channel allowlist, and permissions required; content may be suppressed without privileged intent |
 | Bluesky | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes through public AppView GET endpoints |
 
-`—` means not implemented, rather than a claim that the platform itself lacks the capability. `*` 4chan search is limited to matching preview text in the active catalog of one explicitly selected board; it is not global full-text search. Hacker News has no search operation in its official Firebase API. Lemmy and Discourse need an instance URL and only return content visible to anonymous visitors.
+`—` means not implemented, rather than a claim that the platform itself lacks the capability. `*` Discord’s adapter is registered only when `DISCORD_ALLOWED_CHANNEL_IDS` contains one or more channel snowflakes. `†` 4chan search is limited to matching preview text in the active catalog of one explicitly selected board; it is not global full-text search. Hacker News has no search operation in its official Firebase API. Lemmy and Discourse need an instance URL and only return content visible to anonymous visitors.
 
 ### Other operations
 
@@ -168,7 +168,7 @@ No adapter in this release implements media extraction, transcripts, or archives
 - No browser cookies or account passwords are imported. The local JSON config has no credential fields; optional PAT/OAuth values are environment-only.
 - Logs avoid request query strings and response bodies. Upstream public content can still contain personal data; callers should apply their own retention and display policies.
 
-Optional credentials are environment-only: set V2EX_ACCESS_TOKEN for V2EX topic reads/replies. For Reddit, set REDDIT_API_APPROVED=true only after Reddit has approved the app and use case, then provide REDDIT_ACCESS_TOKEN, REDDIT_CLIENT_ID, and REDDIT_USERNAME. Reddit requests remain disabled when any required setting is absent. OS credential-store integration is not included.
+Optional credentials are environment-only: set V2EX_ACCESS_TOKEN for V2EX topic reads/replies. For Reddit, set REDDIT_API_APPROVED=true only after Reddit has approved the app and use case, then provide REDDIT_ACCESS_TOKEN, REDDIT_CLIENT_ID, and REDDIT_USERNAME. Reddit requests remain disabled when any required setting is absent. X requires X_API_BEARER_TOKEN and X_API_ALLOW_PAID_READS=true; recent search and exact reads use prepaid credits, so review current pricing first. Discord requires DISCORD_BOT_TOKEN and a comma-separated DISCORD_ALLOWED_CHANNEL_IDS allowlist; only those channels are addressable. OS credential-store integration is not included.
 
 ## Troubleshooting
 
@@ -188,11 +188,11 @@ python -m pip install -e '.[test]'
 python -m pytest
 ```
 
-Tests use deterministic mocked responses and should not require platform accounts or make live requests. CI runs the test suite on Linux, macOS, and Windows for supported Python versions.
+Tests use deterministic mocked responses and should not require platform accounts or make live requests. The current repository does not yet include a configured CI workflow; Linux, macOS, and Windows have not all been release-tested.
 
 ## Known limitations
 
-- Fourteen of the 35 catalog entries have adapters; these are partial implementations, not full coverage of every platform feature. Reddit remains dormant until its approval and OAuth settings are present. Steam discussions remain restricted.
+- Fifteen of the 35 catalog entries have adapters registered by default; Discord can be registered separately with its explicit channel allowlist. These are partial implementations, not full coverage of every platform feature. Reddit remains dormant until its approval and OAuth settings are present. Steam discussions remain restricted.
 - Public endpoints may change, return partial data, enforce rate limits, or deny particular content. Errors preserve those limits instead of retrying indefinitely.
 - Anonymous GitHub and Stack Exchange quotas are limited. Stack Exchange page depth is bounded; GitHub search exposes a bounded result window.
 - 4chan calls are rate-limited in-process and search is board-catalog-only. Discourse and Lemmy depend on the selected instance.
@@ -216,6 +216,11 @@ Adapter routes and access declarations are based on the platforms' published doc
 - [V2EX API 2.0](https://edge.v2ex.com/help/api) and [legacy profile API](https://www.v2ex.com/p/7v9tec53)
 - [Bogleheads Atom feed announcement](https://www.bogleheads.org/forum/viewtopic.php?p=3123123)
 - [Steam Web API](https://steamcommunity.com/dev) and [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/)
+- [Zhihu API Platform](https://developer.zhihu.com/) and [Zhihu Agreement](https://www.zhihu.com/plainterms)
+- [Quora public-data information](https://help.quora.com/hc/en-us/articles/15205064557844-Can-I-opt-out-of-having-my-Quora-content-used-to-train-LLMs) and [partner data program](https://aws.amazon.com/marketplace/pp/prodview-qkz4nbakwh7cs)
+- [Pinterest API access tiers](https://developers.pinterest.com/docs/key-concepts/access-tiers/) and [developer guidelines](https://policy.pinterest.com/en-gb/developer-guidelines/)
+- [X recent Post search](https://docs.x.com/x-api/posts/search-recent-posts), [Get Post by ID](https://docs.x.com/x-api/posts/get-post-by-id), and [pricing](https://docs.x.com/x-api/getting-started/pricing)
+- [Discord API reference](https://docs.discord.com/developers/reference), [message routes](https://docs.discord.com/developers/resources/message), and [permissions](https://docs.discord.com/developers/topics/permissions)
 
 ## Contributing
 
