@@ -2,20 +2,20 @@
 
 Universal Reach is a local, read-only CLI and Model Context Protocol (MCP) server for retrieving public content from supported social platforms and online communities. It makes direct requests to documented public APIs; there is no Universal Reach cloud service.
 
-The project catalogs all 35 requested platforms and currently implements partial adapters for 15 platform IDs; Discord can be activated separately with an explicit channel allowlist. The catalog distinguishes working adapters from restricted and not-yet-implemented platforms. It does not claim that a listed platform is fully supported.
+The project catalogs all 35 requested platforms and implements adapters for 19 platform IDs; Discord can be activated separately with an explicit channel allowlist. Some adapters require approved, owner-authorized tokens. The catalog distinguishes working adapters from restricted and not-yet-implemented platforms. It does not claim that a listed platform is fully supported.
 
 ## Architecture
 
-The CLI and stdio MCP server share one `ReachService` and a capability registry. Platform-specific adapters live under `src/universal_reach/adapters/`; they normalize responses into common records and use the shared bounded HTTP client. The JSON config stores public instance URLs and logging preferences only. Optional Reddit OAuth and V2EX PAT credentials are read from environment variables when an operation needs them. There is no browser automation backend or Universal Reach cloud service.
+The CLI and stdio MCP server share one `ReachService` and a capability registry. Platform-specific adapters live under `src/universal_reach/adapters/`; they normalize responses into common records and use the shared bounded HTTP client. The JSON config stores public instance URLs and logging preferences only. Optional OAuth, PAT, and bot credentials are read from environment variables when an operation needs them. There is no browser automation backend or Universal Reach cloud service.
 
 ## Features
 
 - One Python package, CLI, and stdio MCP server.
 - Structured, normalized records with explicit pagination, access mode, and partial-result metadata.
-- Read-only anonymous adapters, plus opt-in Reddit OAuth, V2EX Personal Access Token, X app-only reads, and an allowlisted Discord bot.
+- Read-only anonymous adapters, plus opt-in Reddit OAuth, V2EX Personal Access Token, X app-only reads, owner-authorized Facebook/Instagram/Threads/TikTok reads, and an allowlisted Discord bot.
 - Host allowlists, HTTPS-only requests, redirect checks, bounded timeouts and retries, input validation, and safe error messages.
 - Configurable public Lemmy and Discourse instances, with DNS checks that reject private or non-global addresses.
-- No browser cookies or account passwords are used. Reddit requires prior platform approval; Reddit and V2EX credentials are read from environment variables and never stored in the local JSON configuration.
+- No browser cookies or account passwords are used. Platform tokens are read from environment variables and never stored in the local JSON configuration. Reddit and X require explicit approval or paid-read opt-in; Meta adapters are restricted to authorized owner accounts.
 
 ## Installation
 
@@ -71,6 +71,19 @@ universal-reach search --platform 4chan --query "example" --options '{"board":"g
 universal-reach search --platform lemmy --query "example" --options '{"instance_url":"https://lemmy.world"}'
 universal-reach search --platform discourse --query "example" --options '{"instance_url":"https://meta.discourse.org"}'
 ```
+
+Owner-authorized Meta reads use environment variables and accept only the configured account:
+
+```sh
+universal-reach profile-posts --platform facebook --username "$META_FACEBOOK_PAGE_ID"
+universal-reach profile-posts --platform instagram --username "$META_INSTAGRAM_USER_ID"
+universal-reach profile-posts --platform threads --username me
+universal-reach profile --platform tiktok --username 'APP_SPECIFIC_OPEN_ID'
+universal-reach profile-posts --platform tiktok --username 'APP_SPECIFIC_OPEN_ID'
+universal-reach read --url 'https://www.threads.com/@<handle>/post/<shortcode>' --options '{"thread_id":"<numeric-api-id>"}'
+```
+
+Threads URLs contain a shortcode, while the official read and replies routes require the numeric API ID. Supply that ID from an authorized Threads API result in `options.thread_id`.
 
 Lemmy defaults to `https://lemmy.world`. Persistent local configuration is JSON at:
 
@@ -135,11 +148,11 @@ The table describes operations present in this source release. A check means an 
 | DEV Community | Partial | ✓ | ✓ | — | ✓ | ✓ | Yes for implemented public Forem routes |
 | Indie Hackers | Restricted | — | — | — | — | — | Terms prohibit automated crawling/scraping; no official feed found |
 | Bogleheads | Partial | — | ✓ | — | — | — | Anonymous exact-post reads only when the post is in the bounded topic Atom feed |
-| Facebook | Restricted | — | — | — | — | — | Official content access requires authorized API access |
-| Instagram | Restricted | — | — | — | — | — | Official API access is account- and permission-scoped |
+| Facebook | Restricted | — | — | — | — | ✓ | Configured Page token, `pages_read_engagement`, `pages_read_user_content`, and Page `MODERATE` task; approximately 600 ranked published posts/year |
+| Instagram | Restricted | — | — | — | ✓ | ✓ | Configured professional account only; Graph API scopes and app access apply; at most 10,000 recent media items |
 | YouTube | Partial | — | — | — | — | ✓ | Anonymous recent channel Atom feed; broader Data API access requires a Google API key |
 | WhatsApp | Planned | — | — | — | — | — | No public read API verified |
-| TikTok | Restricted | — | — | — | — | — | Official public-content APIs require authorization/approval |
+| TikTok | Partial | — | — | — | ✓ | ✓ | OAuth token for the owner account; Display API scopes and app approval required |
 | WeChat | Planned | — | — | — | — | — | Not verified |
 | Telegram | Partial | — | ✓ | — | ✓ | ✓ | Anonymous public channel previews; hidden posts and groups are unsupported |
 | Snapchat | Restricted | — | — | — | — | — | Public Profile API is allowlisted and token-based |
@@ -148,12 +161,12 @@ The table describes operations present in this source release. A check means an 
 | Weibo | Planned | — | — | — | — | — | Not verified |
 | Pinterest | Restricted | — | — | — | — | — | App review and OAuth required; reads are account-scoped and public search is not documented |
 | X / Twitter | Partial | ✓ | ✓ | — | — | — | App-only Bearer token and explicit paid-read opt-in; recent search covers seven days |
-| Threads | Restricted | — | — | — | — | — | Meta app authorization and scopes required |
+| Threads | Restricted | — | ✓ | ✓ | ✓ | ✓ | OAuth token owner's profile/posts; replies require `threads_read_replies`; exact reads require numeric API ID |
 | LinkedIn | Restricted | — | — | — | — | — | OAuth and product access required |
 | Discord | Restricted* | — | ✓ | ✓ | — | — | Bot token, channel allowlist, and permissions required; content may be suppressed without privileged intent |
 | Bluesky | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes through public AppView GET endpoints |
 
-`—` means not implemented, rather than a claim that the platform itself lacks the capability. `*` Discord’s adapter is registered only when `DISCORD_ALLOWED_CHANNEL_IDS` contains one or more channel snowflakes. `†` 4chan search is limited to matching preview text in the active catalog of one explicitly selected board; it is not global full-text search. Hacker News has no search operation in its official Firebase API. Lemmy and Discourse need an instance URL and only return content visible to anonymous visitors.
+`—` means not implemented, rather than a claim that the platform itself lacks the capability. `*` Discord’s adapter is registered only when `DISCORD_ALLOWED_CHANNEL_IDS` contains one or more channel snowflakes. `†` 4chan search is limited to matching preview text in the active catalog of one explicitly selected board; it is not global full-text search. Hacker News has no search operation in its official Firebase API. Lemmy and Discourse need an instance URL and only return content visible to anonymous visitors. Facebook, Instagram, Threads, and TikTok use owner-authorized APIs and do not provide anonymous access.
 
 ### Other operations
 
@@ -161,14 +174,25 @@ No adapter in this release implements media extraction, transcripts, or archives
 
 ## Security and privacy
 
-- Requests are read-only HTTP GETs to documented public APIs, official feeds, or public previews. Adapters do not bypass authentication or access controls.
+- Requests use read-only HTTP methods to documented APIs, official feeds, or public previews. TikTok's `video.list` API uses POST for a read operation; no adapter uses POST to publish or modify content. Adapters do not bypass authentication or access controls; owner-authorized Meta and TikTok reads remain limited to configured account identities.
 - Static API hosts are allowlisted; URL inputs require HTTPS and reject credentials and nonstandard ports. Redirects are revalidated.
 - Lemmy and Discourse origins must be public HTTPS hosts. Resolution rejects localhost, private, link-local, and other non-global addresses, then pins the connection to an address that passed validation. These two adapters connect directly and ignore proxy environment settings so a proxy cannot resolve the hostname to a different address.
 - The local MCP server listens on stdio; this package does not open an inbound network server.
 - No browser cookies or account passwords are imported. The local JSON config has no credential fields; optional PAT/OAuth values are environment-only.
 - Logs avoid request query strings and response bodies. Upstream public content can still contain personal data; callers should apply their own retention and display policies.
 
-Optional credentials are environment-only: set V2EX_ACCESS_TOKEN for V2EX topic reads/replies. For Reddit, set REDDIT_API_APPROVED=true only after Reddit has approved the app and use case, then provide REDDIT_ACCESS_TOKEN, REDDIT_CLIENT_ID, and REDDIT_USERNAME. Reddit requests remain disabled when any required setting is absent. X requires X_API_BEARER_TOKEN and X_API_ALLOW_PAID_READS=true; recent search and exact reads use prepaid credits, so review current pricing first. Discord requires DISCORD_BOT_TOKEN and a comma-separated DISCORD_ALLOWED_CHANNEL_IDS allowlist; only those channels are addressable. OS credential-store integration is not included.
+Optional credentials are environment-only:
+
+- V2EX topic reads/replies use `V2EX_ACCESS_TOKEN`.
+- Reddit requires prior approval; only then set `REDDIT_API_APPROVED=true` and provide `REDDIT_ACCESS_TOKEN`, `REDDIT_CLIENT_ID`, and `REDDIT_USERNAME`. Requests remain disabled when a required setting is absent.
+- X requires `X_API_BEARER_TOKEN` and the explicit `X_API_ALLOW_PAID_READS=true` opt-in. Recent search and exact reads use prepaid credits, so review current pricing first.
+- Facebook requires `META_FACEBOOK_PAGE_ID` and `META_FACEBOOK_PAGE_ACCESS_TOKEN`, plus the Page permissions described in its capability entry. `META_FACEBOOK_PAGE_USERNAME` is optional and only matches that same Page.
+- Instagram requires `META_INSTAGRAM_USER_ID` and `META_INSTAGRAM_ACCESS_TOKEN` for a professional account. `META_INSTAGRAM_USERNAME` is an optional account-name match.
+- Threads requires `META_THREADS_ACCESS_TOKEN`; profile and post reads use the token owner, and replies also require `threads_read_replies`. Optional `META_THREADS_USER_ID` and `META_THREADS_USERNAME` bind calls to the expected owner. Exact reads and replies need `options.thread_id`, the numeric API ID returned by the Threads API; a public shortcode URL alone is insufficient.
+- TikTok's Display API requires `TIKTOK_ACCESS_TOKEN` with the `user.info.basic` and `video.list` scopes. Supply the app-specific `open_id` returned by TikTok as the `username` argument; tokens are rejected from tool options to keep them out of MCP/CLI arguments. Search, public profile discovery, and anonymous reads are not implemented.
+- Discord requires `DISCORD_BOT_TOKEN` and a comma-separated `DISCORD_ALLOWED_CHANNEL_IDS` allowlist; only those channels are addressable.
+
+OS credential-store integration is not included.
 
 ## Troubleshooting
 
@@ -192,7 +216,7 @@ Tests use deterministic mocked responses and should not require platform account
 
 ## Known limitations
 
-- Fifteen of the 35 catalog entries have adapters registered by default; Discord can be registered separately with its explicit channel allowlist. These are partial implementations, not full coverage of every platform feature. Reddit remains dormant until its approval and OAuth settings are present. Steam discussions remain restricted.
+- Nineteen of the 35 catalog entries have adapters registered by default; Discord can be registered separately with its explicit channel allowlist. These are partial implementations, not full coverage of every platform feature. Reddit remains dormant until its approval and OAuth settings are present. Meta and TikTok reads require authorized account tokens; Steam discussions remain restricted.
 - Public endpoints may change, return partial data, enforce rate limits, or deny particular content. Errors preserve those limits instead of retrying indefinitely.
 - Anonymous GitHub and Stack Exchange quotas are limited. Stack Exchange page depth is bounded; GitHub search exposes a bounded result window.
 - 4chan calls are rate-limited in-process and search is board-catalog-only. Discourse and Lemmy depend on the selected instance.
@@ -221,6 +245,10 @@ Adapter routes and access declarations are based on the platforms' published doc
 - [Pinterest API access tiers](https://developers.pinterest.com/docs/key-concepts/access-tiers/) and [developer guidelines](https://policy.pinterest.com/en-gb/developer-guidelines/)
 - [X recent Post search](https://docs.x.com/x-api/posts/search-recent-posts), [Get Post by ID](https://docs.x.com/x-api/posts/get-post-by-id), and [pricing](https://docs.x.com/x-api/getting-started/pricing)
 - [Discord API reference](https://docs.discord.com/developers/reference), [message routes](https://docs.discord.com/developers/resources/message), and [permissions](https://docs.discord.com/developers/topics/permissions)
+- [Meta Page Published Posts](https://developers.facebook.com/docs/graph-api/reference/page/published_posts/), [Page permissions](https://developers.facebook.com/docs/graph-api/reference/page/), and [Graph API versioning](https://developers.facebook.com/docs/graph-api/guides/versioning)
+- [Instagram Platform overview](https://developers.facebook.com/documentation/instagram-platform/overview) and [IG User Media](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media)
+- [Meta Threads API collection](https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api), which describes the token-owner and reply endpoints used by the adapter
+- [TikTok Display API overview](https://developers.tiktok.com/docs/en/display-api-overview), [Get user info](https://developers.tiktok.com/docs/en/tiktok-api-v2-get-user-info), [List videos](https://developers.tiktok.com/docs/en/tiktok-api-v2-video-list), and [error handling](https://developers.tiktok.com/docs/en/tiktok-api-v2-error-handling)
 
 ## Contributing
 

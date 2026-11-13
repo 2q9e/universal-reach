@@ -8,9 +8,13 @@ from universal_reach.adapters.discord import DiscordAdapter
 from universal_reach.adapters.forem import ForemAdapter
 from universal_reach.adapters.github import GitHubAdapter
 from universal_reach.adapters.hackernews import HackerNewsAdapter
+from universal_reach.adapters.meta_facebook import FacebookPageAdapter
+from universal_reach.adapters.meta_instagram import InstagramProfessionalAdapter
 from universal_reach.adapters.public_forums import DiscourseAdapter, FourChanAdapter, LemmyAdapter
 from universal_reach.adapters.reddit import RedditAdapter
 from universal_reach.adapters.telegram import TelegramAdapter
+from universal_reach.adapters.tiktok import TikTokAdapter
+from universal_reach.adapters.threads import ThreadsAdapter
 from universal_reach.adapters.youtube import YouTubeAdapter
 from universal_reach.adapters.x import XAdapter
 from universal_reach.adapters.stackexchange import StackExchangeAdapter
@@ -35,6 +39,10 @@ def build_registry() -> AdapterRegistry:
         DiscourseAdapter(),
         ForemAdapter(),
         BlueskyAdapter(),
+        FacebookPageAdapter(),
+        InstagramProfessionalAdapter(),
+        ThreadsAdapter(),
+        TikTokAdapter(),
     ]
     allowed_channels = [
         channel_id.strip()
