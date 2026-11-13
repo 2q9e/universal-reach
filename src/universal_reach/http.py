@@ -199,6 +199,127 @@ def _fetch_json_sync(
     raise ReachError("network_error", "The upstream request failed.", retryable=True)
 
 
+def _decode_text_body(
+    body: bytes,
+    content_encoding: str | None,
+    charset: str | None,
+    max_bytes: int,
+) -> str:
+    encoding = (content_encoding or "").strip().lower()
+    try:
+        if encoding == "gzip":
+            decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            decoded = decompressor.decompress(body, max_bytes + 1)
+            if len(decoded) > max_bytes or decompressor.unconsumed_tail:
+                raise ReachError("response_too_large", "The decoded upstream response exceeded the configured size limit.", details={"maximum_bytes": max_bytes})
+            body = decoded + decompressor.flush(max_bytes + 1 - len(decoded))
+        elif encoding == "deflate":
+            decompressor = zlib.decompressobj()
+            decoded = decompressor.decompress(body, max_bytes + 1)
+            if len(decoded) > max_bytes or decompressor.unconsumed_tail:
+                raise ReachError("response_too_large", "The decoded upstream response exceeded the configured size limit.", details={"maximum_bytes": max_bytes})
+            body = decoded + decompressor.flush(max_bytes + 1 - len(decoded))
+        elif encoding not in {"", "identity"}:
+            raise ReachError("parser_error", "The platform returned an unsupported content encoding.")
+        if len(body) > max_bytes:
+            raise ReachError("response_too_large", "The decoded upstream response exceeded the configured size limit.", details={"maximum_bytes": max_bytes})
+        selected_charset = charset or "utf-8-sig"
+        if body.startswith(b"\xef\xbb\xbf") and selected_charset.lower().replace("_", "-") == "utf-8":
+            selected_charset = "utf-8-sig"
+        return body.decode(selected_charset)
+    except ReachError:
+        raise
+    except (OSError, zlib.error, LookupError, UnicodeDecodeError) as exc:
+        raise ReachError("parser_error", "The platform returned malformed or undecodable text.") from exc
+
+
+def _fetch_text_sync(
+    url: str,
+    allowed_hosts: set[str] | frozenset[str],
+    params: dict[str, Any] | None,
+    headers: dict[str, str] | None,
+    timeout: float,
+    retries: int,
+    max_bytes: int,
+    public_instance: bool = False,
+) -> str:
+    final_url = _with_query(url, params)
+    validate_https_url(final_url, allowed_hosts)
+    pinned_addresses = None
+    if public_instance:
+        host = (urlsplit(final_url).hostname or "").lower().rstrip(".")
+        pinned_addresses = resolve_public_addresses(host, 443)
+    request_headers = {
+        "Accept": "text/html, application/rss+xml, application/atom+xml, application/xml;q=0.9, text/plain;q=0.8",
+        "Accept-Encoding": "identity",
+        "User-Agent": "UniversalReach/0.1.0 (+https://github.com/2q9e/universal-reach)",
+    }
+    if headers:
+        request_headers.update(headers)
+    if pinned_addresses is None:
+        opener = build_opener(_SafeRedirects(allowed_hosts))
+    else:
+        host = (urlsplit(final_url).hostname or "").lower().rstrip(".")
+        # Do not let a redirect send a pinned connection to a different public
+        # instance hostname whose addresses were never validated here.
+        opener = build_opener(
+            ProxyHandler({}),
+            _SafeRedirects({host}),
+            _PinnedHTTPSHandler(pinned_addresses),
+        )
+    for attempt in range(retries + 1):
+        started = time.monotonic()
+        try:
+            request = Request(final_url, headers=request_headers, method="GET")
+            with opener.open(request, timeout=timeout) as response:
+                response_url = response.geturl()
+                validate_https_url(response_url, allowed_hosts)
+                body = response.read(max_bytes + 1)
+                if len(body) > max_bytes:
+                    raise ReachError(
+                        "response_too_large",
+                        "The upstream text response exceeded the configured size limit.",
+                        details={"maximum_bytes": max_bytes},
+                    )
+                text = _decode_text_body(
+                    body,
+                    response.headers.get("Content-Encoding"),
+                    response.headers.get_content_charset(),
+                    max_bytes,
+                )
+                logger.debug("GET %s completed in %.3fs", urlsplit(final_url).hostname, time.monotonic() - started)
+                return text
+        except HTTPError as exc:
+            if exc.code == 404:
+                raise ReachError("not_found", "The requested public content was not found.", details={"http_status": 404}) from exc
+            if exc.code in (401, 403):
+                raise ReachError("private_or_inaccessible", "The platform did not make this content publicly accessible.", details={"http_status": exc.code}) from exc
+            if exc.code == 429:
+                retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
+                if attempt < retries:
+                    try:
+                        delay = min(max(int(retry_after), 1), 8)
+                    except ValueError:
+                        delay = 2 ** attempt
+                    time.sleep(delay)
+                    continue
+                raise ReachError("rate_limited", "The platform rate-limited this request.", retryable=True, details={"http_status": 429}) from exc
+            if 500 <= exc.code < 600:
+                if attempt < retries:
+                    time.sleep(0.25 * (2 ** attempt))
+                    continue
+                raise ReachError("temporarily_unavailable", "The upstream platform is temporarily unavailable.", retryable=True, details={"http_status": exc.code}) from exc
+            raise ReachError("upstream_error", "The upstream platform rejected the request.", details={"http_status": exc.code}) from exc
+        except ReachError:
+            raise
+        except (TimeoutError, URLError, OSError) as exc:
+            if attempt < retries:
+                time.sleep(0.25 * (2 ** attempt))
+                continue
+            raise ReachError("network_error", "The upstream request failed or timed out.", retryable=True) from exc
+    raise ReachError("network_error", "The upstream request failed.", retryable=True)
+
+
 async def get_json(
     url: str,
     *,
@@ -221,5 +342,32 @@ async def get_json(
         retries,
         assume_gzip,
         json_error_statuses,
+        public_instance,
+    )
+
+
+async def get_text(
+    url: str,
+    *,
+    allowed_hosts: set[str] | frozenset[str],
+    params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float = 12.0,
+    retries: int = 1,
+    max_bytes: int = 2_000_000,
+    public_instance: bool = False,
+) -> str:
+    """Fetch bounded text from an explicitly allowed HTTPS host."""
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= 10_000_000:
+        raise ReachError("invalid_argument", "max_bytes must be between 1 and 10000000.")
+    return await asyncio.to_thread(
+        _fetch_text_sync,
+        url,
+        allowed_hosts,
+        params,
+        headers,
+        timeout,
+        retries,
+        max_bytes,
         public_instance,
     )

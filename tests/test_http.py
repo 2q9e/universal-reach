@@ -176,3 +176,116 @@ def test_pinned_https_connection_uses_validated_ip_and_original_tls_host(monkeyp
     assert fake_socket.destination == ("93.184.216.34", 443)
     assert fake_socket.timeout == 2.0
     assert fake_context.server_hostname == "instance.example"
+
+
+@pytest.mark.parametrize(
+    ("body", "encoding", "charset", "expected"),
+    [
+        (gzip.compress("hello 🧭".encode()), "gzip", "utf-8", "hello 🧭"),
+        (zlib.compress(b"<rss/>"), "deflate", "utf-8", "<rss/>"),
+        (b"caf\xe9", None, "iso-8859-1", "café"),
+        (b"\xef\xbb\xbfhello", None, "utf-8", "hello"),
+    ],
+)
+def test_text_body_decodes_content_encoding_and_charset(
+    body: bytes, encoding: str | None, charset: str, expected: str,
+) -> None:
+    assert http._decode_text_body(body, encoding, charset, 100) == expected
+
+
+def test_text_body_limits_decompressed_responses() -> None:
+    compressed = gzip.compress(b"x" * 100_000)
+    with pytest.raises(ReachError) as caught:
+        http._decode_text_body(compressed, "gzip", "utf-8", 1024)
+    assert caught.value.code == "response_too_large"
+
+
+def test_fetch_text_uses_allowed_https_host_and_enforces_response_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = Message()
+    headers["Content-Type"] = "text/html; charset=utf-8"
+
+    class FakeResponse:
+        def __init__(self, body: bytes):
+            self.headers = headers
+            self.body = body
+
+        def geturl(self) -> str:
+            return "https://public.example/page"
+
+        def read(self, limit: int) -> bytes:
+            return self.body[:limit]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class FakeOpener:
+        def __init__(self, body: bytes):
+            self.response = FakeResponse(body)
+
+        def open(self, request, timeout):
+            assert request.get_header("Accept-encoding") == "identity"
+            assert timeout == 2
+            return self.response
+
+    opener = FakeOpener("<html>🧭</html>".encode())
+    monkeypatch.setattr(http, "build_opener", lambda *_: opener)
+    result = http._fetch_text_sync(
+        "https://public.example/page",
+        frozenset({"public.example"}),
+        None,
+        None,
+        2,
+        0,
+        100,
+    )
+    assert result == "<html>🧭</html>"
+
+    opener.response.body = b"too big"
+    with pytest.raises(ReachError) as caught:
+        http._fetch_text_sync(
+            "https://public.example/page",
+            frozenset({"public.example"}),
+            None,
+            None,
+            2,
+            0,
+            4,
+        )
+    assert caught.value.code == "response_too_large"
+
+
+def test_fetch_text_rejects_redirect_outside_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        headers = Message()
+
+        def geturl(self) -> str:
+            return "https://evil.example/page"
+
+        def read(self, _limit: int) -> bytes:
+            return b"<html/>"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class FakeOpener:
+        def open(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(http, "build_opener", lambda *_: FakeOpener())
+    with pytest.raises(ReachError) as caught:
+        http._fetch_text_sync(
+            "https://public.example/page",
+            frozenset({"public.example"}),
+            None,
+            None,
+            2,
+            0,
+            100,
+        )
+    assert caught.value.code == "invalid_url"

@@ -7,7 +7,7 @@ import os
 import pytest
 
 from universal_reach.adapters.factory import build_registry
-from universal_reach.adapters import bluesky, forem, github, hackernews, public_forums, stackexchange
+from universal_reach.adapters import bluesky, bogleheads, forem, github, hackernews, public_forums, reddit, stackexchange, telegram, v2ex, youtube
 from universal_reach.config import load_config, save_config
 from universal_reach.errors import PlatformNotImplemented, ReachError
 from universal_reach.mcp_server import create_mcp_server
@@ -22,10 +22,11 @@ def test_platform_catalog_and_loaded_adapters_are_truthful() -> None:
     assert len(catalog) == 35
     assert len({item["id"] for item in catalog}) == 35
     implemented = [item for item in catalog if item["operations"]]
-    assert len(implemented) == 9
+    assert len(implemented) == 14
     assert {item["id"] for item in implemented} == {
-        "github", "stackoverflow", "stackexchange", "hackernews", "4chan",
-        "lemmy", "discourse", "devto", "bluesky",
+        "github", "stackoverflow", "stackexchange", "hackernews", "v2ex",
+        "bogleheads", "reddit", "telegram", "youtube", "4chan", "lemmy",
+        "discourse", "devto", "bluesky",
     }
     assert all(item["status"] == "partial" for item in implemented)
     assert "search" not in registry.get("hackernews").capability.operations
@@ -34,9 +35,9 @@ def test_platform_catalog_and_loaded_adapters_are_truthful() -> None:
 def test_unsupported_platform_operation_returns_explicit_error() -> None:
     service = ReachService(build_registry(), config={})
     with pytest.raises(PlatformNotImplemented) as error:
-        asyncio.run(service.search("reddit", "example"))
+        asyncio.run(service.search("quora", "example"))
     assert error.value.code == "not_implemented"
-    assert error.value.details["platform"] == "reddit"
+    assert error.value.details["platform"] == "quora"
 
 
 @pytest.mark.asyncio
@@ -100,15 +101,28 @@ async def test_health_check_reaches_each_adapter_and_uses_configured_instances(m
     monkeypatch.setattr(forem, "get_json", forem_json)
     monkeypatch.setattr(bluesky, "get_json", bluesky_json)
 
+    async def available_status(self, options=None):
+        from universal_reach.models import AdapterStatus
+        return AdapterStatus(platform=self.platform, status="available", operations=list(self.capability.operations))
+
+    async def dormant_reddit_status(self, options=None):
+        from universal_reach.models import AdapterStatus
+        return AdapterStatus(platform=self.platform, status="degraded", operations=list(self.capability.operations), message="Approval and OAuth configuration are required.")
+
+    for adapter_class in (bogleheads.BogleheadsAdapter, telegram.TelegramAdapter, v2ex.V2EXAdapter, youtube.YouTubeAdapter):
+        monkeypatch.setattr(adapter_class, "health_check", available_status)
+    monkeypatch.setattr(reddit.RedditAdapter, "health_check", dormant_reddit_status)
+
     service = ReachService(
         build_registry(),
         config={"lemmy_instance": "https://lemmy.example", "discourse_instances": {"main": "https://discourse.example"}},
     )
     result = await service.health_check()
 
-    assert result["healthy"] is True, [(row["platform"], row["status"], row["message"]) for row in result["results"] if row["status"] != "available"]
-    assert len(result["results"]) == 9
-    assert all(row["status"] == "available" for row in result["results"])
+    assert result["healthy"] is False
+    assert len(result["results"]) == 14
+    assert sum(row["status"] == "available" for row in result["results"]) == 13
+    assert next(row for row in result["results"] if row["platform"] == "reddit")["status"] == "degraded"
     assert any(url == "https://lemmy.example/api/v4/search" and kwargs["public_instance"] is True for url, kwargs in calls)
     assert any(url == "https://discourse.example/latest.json" and kwargs["public_instance"] is True for url, kwargs in calls)
 
@@ -123,7 +137,7 @@ async def test_mcp_registers_expected_tools_and_marks_errors() -> None:
         "replies", "profile", "profile_posts", "media", "transcript", "archive", "health_check",
     }
 
-    result = await server.call_tool("search", {"platform": "reddit", "query": "example"})
+    result = await server.call_tool("search", {"platform": "quora", "query": "example"})
     assert result.is_error is True
     assert result.structured_content["error"]["code"] == "not_implemented"
 
@@ -190,6 +204,37 @@ def test_cli_json_and_error_exit_code(capsys: pytest.CaptureFixture[str]) -> Non
     assert len(rows) == 1
     assert rows[0]["platform"] == "hackernews"
     assert rows[0]["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_doctor_performs_live_adapter_checks_and_reports_mcp_readiness(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    from argparse import Namespace
+    from universal_reach import cli
+
+    async def failed_health_check():
+        return {
+            "results": [{"platform": "github", "status": "unavailable", "message": "network_error"}],
+            "healthy": False,
+        }
+
+    class FakeService:
+        health_check = staticmethod(failed_health_check)
+
+    monkeypatch.setattr("universal_reach.config.load_config", lambda: {
+        "lemmy_instance": "https://lemmy.example",
+        "discourse_instances": {"main": "https://forum.example"},
+        "log_level": "INFO",
+    })
+    monkeypatch.setattr("universal_reach.config.config_path", lambda: tmp_path / "config.json")
+    monkeypatch.setattr(cli.importlib.util, "find_spec", lambda name: None)
+
+    result = await cli._dispatch(Namespace(command="doctor"), FakeService())
+
+    assert result["ok"] is False
+    assert result["healthy"] is False
+    assert result["mcp"] == {"ready": False, "transport": "stdio"}
+    assert result["adapter_health"][0]["status"] == "unavailable"
+    assert result["configuration"]["configured_discourse_instances"] == ["main"]
 
 
 def test_malformed_url_returns_reach_error_instead_of_unhandled_value_error() -> None:

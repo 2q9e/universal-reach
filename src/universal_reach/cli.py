@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import json
+import platform as host_platform
 import sys
 from typing import Any
 
@@ -74,7 +76,7 @@ def _parser() -> argparse.ArgumentParser:
 
     health = sub.add_parser("health-check", help="Make bounded live checks for selected adapters.")
     health.add_argument("--platform", action="append", dest="platforms", help="Repeat to select platforms; defaults to implemented adapters.")
-    sub.add_parser("doctor", help="Validate local configuration and print adapter status.")
+    sub.add_parser("doctor", help="Validate local configuration, MCP readiness, and live adapter health.")
     sub.add_parser("mcp", help="Run the local MCP server over stdio.")
     return parser
 
@@ -117,12 +119,30 @@ async def _dispatch(args: argparse.Namespace, service: ReachService) -> Any:
     if command == "status":
         return await service.platform_status(args.platform)
     if command == "doctor":
-        from universal_reach.config import load_config, config_path
+        from universal_reach.config import config_path, load_config
 
         config = load_config()
-        statuses = await service.platform_status()
-        implemented = [entry["platform"] for entry in statuses["platforms"] if entry["status"] == "degraded"]
-        return {"ok": True, "config_path": str(config_path()), "config_valid": True, "configured_adapters": implemented, "config": config}
+        health = await service.health_check()
+        mcp_ready = importlib.util.find_spec("mcp") is not None
+        return {
+            "ok": bool(health["healthy"]) and mcp_ready,
+            "application": {"name": "Universal Reach", "version": __version__},
+            "runtime": {
+                "os": host_platform.system(),
+                "architecture": host_platform.machine(),
+                "python": host_platform.python_version(),
+            },
+            "configuration": {
+                "valid": True,
+                "path": str(config_path()),
+                "configured_lemmy_instance": bool(config.get("lemmy_instance")),
+                "configured_discourse_instances": sorted(config.get("discourse_instances", {})),
+            },
+            "mcp": {"ready": mcp_ready, "transport": "stdio"},
+            "optional_dependencies": [],
+            "adapter_health": health["results"],
+            "healthy": health["healthy"],
+        }
     if command == "health-check":
         return await service.health_check(args.platforms)
 

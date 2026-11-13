@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import urlsplit
 
 from universal_reach.adapters.base import Adapter
@@ -89,6 +90,11 @@ class AdapterRegistry:
                     status="degraded",
                     message="Adapter is configured; live upstream health has not been checked.",
                     operations=list(adapter.capability.operations),
+                    access_mode=(
+                        "anonymous"
+                        if capability.anonymous_access == "yes"
+                        else "unknown"
+                    ),
                 )
             results.append(result.to_dict())
         return results
@@ -101,8 +107,9 @@ class AdapterRegistry:
         selected = [platform.casefold() for platform in platforms] if platforms else list(self._adapters)
         if len(selected) > 35:
             raise ValueError("At most 35 platforms may be checked at once.")
-        results: list[dict[str, object]] = []
-        for key in selected:
+        semaphore = asyncio.Semaphore(5)
+
+        async def check_one(key: str) -> dict[str, object]:
             capability = self.capability(key)
             adapter = self._adapters.get(key)
             if adapter is None:
@@ -119,7 +126,8 @@ class AdapterRegistry:
                 )
             else:
                 try:
-                    status = await adapter.health_check((options_by_platform or {}).get(key))
+                    async with semaphore:
+                        status = await adapter.health_check((options_by_platform or {}).get(key))
                 except Exception:
                     status = AdapterStatus(
                         platform=key,
@@ -127,5 +135,6 @@ class AdapterRegistry:
                         message="The adapter health check failed.",
                         operations=list(adapter.capability.operations),
                     )
-            results.append(status.to_dict())
-        return results
+            return status.to_dict()
+
+        return list(await asyncio.gather(*(check_one(key) for key in selected)))
