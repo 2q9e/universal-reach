@@ -1,28 +1,35 @@
-"""Anonymous, read-only access to YouTube's documented channel video feed.
+"""Anonymous, read-only access to YouTube's public channel feed and oEmbed.
 
 The YouTube Data API requires credentials even for public reads; this adapter
-does not use an API key or account credentials. It implements only the public
-channel Atom feed documented for
-YouTube's push-notification topic URLs. It does not search, fetch arbitrary
-video metadata, read comments, or claim to enumerate a channel's full history.
+does not use an API key or account credentials. Public channel Atom feeds give
+recent uploads; oEmbed provides limited metadata for an exact public video URL.
+It does not search, read comments, retrieve captions, or enumerate full channel
+history.
 """
 
 from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from typing import Any
-from urllib.parse import quote
+from typing import Any, Literal
+from urllib.parse import parse_qs, quote, urlsplit
 from xml.etree import ElementTree
 
 from universal_reach.adapters.base import Adapter, adapter_capability
 from universal_reach.errors import ReachError
-from universal_reach.http import get_text
-from universal_reach.models import AccessInfo, AdapterStatus, Pagination, Record, ResultPage
+from universal_reach.http import get_json, get_text
+from universal_reach.models import AccessInfo, AdapterStatus, MediaItem, Pagination, Record, ResultPage
+from universal_reach.security import validate_https_url
 
 
 FEED_URL = "https://www.youtube.com/xml/feeds/videos.xml"
-URL_HOSTS = frozenset({"www.youtube.com"})
+OEMBED_URL = "https://www.youtube.com/oembed"
+FEED_HOSTS = frozenset({"www.youtube.com"})
+OEMBED_HOSTS = frozenset({"www.youtube.com"})
+THUMBNAIL_HOSTS = frozenset({"i.ytimg.com", "img.youtube.com"})
+URL_HOSTS = frozenset({
+    "www.youtube.com", "youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be",
+})
 _ATOM_NS = "http://www.w3.org/2005/Atom"
 _YT_NS = "http://www.youtube.com/xml/schemas/2015"
 _CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{1,126}$")
@@ -30,6 +37,7 @@ _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _MAX_LIMIT = 100
 _MAX_FEED_BYTES = 500_000
 _HEALTH_CHANNEL_ID = "UC_x5XG1OV2P6uZZ5FSM9Ttw"
+_HEALTH_VIDEO_ID = "M7lc1UVf-VE"
 
 
 class YouTubeAdapter(Adapter):
@@ -38,26 +46,90 @@ class YouTubeAdapter(Adapter):
     url_hosts = URL_HOSTS
 
     def __init__(self) -> None:
-        super().__init__(adapter_capability("youtube", ("profile_posts",)))
+        super().__init__(adapter_capability("youtube", ("read", "profile_posts")))
 
     async def health_check(self, options: dict[str, Any] | None = None) -> AdapterStatus:
         del options
+        feed_issue: str | None = None
+        oembed_issue: str | None = None
         try:
             await self.profile_posts(_HEALTH_CHANNEL_ID, limit=1)
         except ReachError as exc:
-            return AdapterStatus(
-                platform=self.platform,
-                status="degraded" if exc.code == "rate_limited" else "unavailable",
-                operations=list(self.capability.operations),
-                message=f"YouTube channel-feed health check failed ({exc.code}).",
-                access_mode="anonymous",
+            feed_issue = exc.code
+        try:
+            await self.read(_video_url(_HEALTH_VIDEO_ID))
+        except ReachError as exc:
+            oembed_issue = exc.code
+
+        if feed_issue is None and oembed_issue is None:
+            status: Literal["available", "degraded", "unavailable"] = "available"
+            message = "The public YouTube channel feed and oEmbed endpoint responded."
+        elif feed_issue is None or oembed_issue is None:
+            status = "degraded"
+            message = (
+                "Only one YouTube source responded; "
+                f"channel feed={feed_issue or 'available'}, oEmbed={oembed_issue or 'available'}."
             )
+        elif "rate_limited" in {feed_issue, oembed_issue}:
+            status = "degraded"
+            message = (
+                "Both YouTube source checks failed and at least one was rate-limited; "
+                f"channel feed={feed_issue}, oEmbed={oembed_issue}."
+            )
+        else:
+            status = "unavailable"
+            message = f"YouTube live checks failed; channel feed={feed_issue}, oEmbed={oembed_issue}."
         return AdapterStatus(
             platform=self.platform,
-            status="available",
+            status=status,
             operations=list(self.capability.operations),
-            message="The documented public YouTube channel feed responded.",
+            message=message,
             access_mode="anonymous",
+        )
+
+    async def read(self, url: str, options: dict[str, Any] | None = None) -> Record:
+        del options
+        video_id = _parse_video_id(url)
+        canonical_url = _video_url(video_id)
+        response = await get_json(
+            OEMBED_URL,
+            allowed_hosts=OEMBED_HOSTS,
+            params={"url": canonical_url, "format": "json"},
+        )
+        if not isinstance(response, dict) or response.get("type") != "video":
+            raise ReachError("parser_error", "YouTube oEmbed returned an invalid video response.")
+        raw_title = response.get("title")
+        raw_author = response.get("author_name")
+        title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else None
+        author = raw_author.strip() if isinstance(raw_author, str) and raw_author.strip() else None
+        if title is None and author is None:
+            raise ReachError("parser_error", "YouTube oEmbed returned no video title or author metadata.")
+
+        media: list[MediaItem] = []
+        thumbnail_url = response.get("thumbnail_url")
+        if isinstance(thumbnail_url, str):
+            try:
+                validate_https_url(thumbnail_url, THUMBNAIL_HOSTS)
+            except ReachError:
+                pass
+            else:
+                metadata: dict[str, Any] = {}
+                for field in ("thumbnail_width", "thumbnail_height"):
+                    value = response.get(field)
+                    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                        metadata[field.removeprefix("thumbnail_")] = value
+                media.append(MediaItem(kind="thumbnail", url=thumbnail_url, metadata=metadata))
+
+        return Record(
+            platform=self.platform,
+            type="video",
+            id=video_id,
+            url=canonical_url,
+            author=author,
+            title=title,
+            media=media,
+            access=AccessInfo(mode="anonymous", complete=False),
+            extensions={"metadata_source": "youtube_oembed"},
         )
 
     async def profile_posts(
@@ -74,7 +146,7 @@ class YouTubeAdapter(Adapter):
 
         feed_text = await get_text(
             FEED_URL,
-            allowed_hosts=URL_HOSTS,
+            allowed_hosts=FEED_HOSTS,
             params={"channel_id": channel_id},
             max_bytes=_MAX_FEED_BYTES,
         )
@@ -120,6 +192,32 @@ def _validate_channel_id(value: str) -> str:
             "Supply a YouTube channel ID beginning with UC and containing only letters, numbers, underscores, or hyphens.",
         )
     return value.strip()
+
+
+def _video_url(video_id: str) -> str:
+    return f"https://www.youtube.com/watch?v={quote(video_id, safe='')}"
+
+
+def _parse_video_id(url: str) -> str:
+    if not isinstance(url, str) or not url:
+        raise ReachError("invalid_url", "A non-empty YouTube video URL is required.")
+    validate_https_url(url, URL_HOSTS)
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    path = parsed.path.rstrip("/")
+    candidate: str | None = None
+    if host == "youtu.be":
+        segments = path.lstrip("/").split("/")
+        candidate = segments[0] if len(segments) == 1 else None
+    elif path == "/watch":
+        candidate = parse_qs(parsed.query).get("v", [None])[0]
+    else:
+        segments = path.strip("/").split("/")
+        if len(segments) == 2 and segments[0] in {"shorts", "embed", "live", "v"}:
+            candidate = segments[1]
+    if not isinstance(candidate, str) or not _VIDEO_ID_RE.fullmatch(candidate):
+        raise ReachError("invalid_url", "Expected a YouTube video URL with a valid video ID.")
+    return candidate
 
 
 def _validate_limit(limit: int) -> int:

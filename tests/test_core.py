@@ -44,6 +44,33 @@ def test_single_capability_lookup_returns_registered_adapter_capability() -> Non
     assert quora.operations == ()
 
 
+def test_youtube_short_video_urls_resolve_to_the_public_adapter() -> None:
+    registry = build_registry()
+
+    assert registry.for_url("https://youtu.be/abc_def-1234").platform == "youtube"
+    assert registry.for_url("https://www.youtube.com/shorts/abc_def-1234").platform == "youtube"
+
+
+@pytest.mark.asyncio
+async def test_service_reads_youtube_short_urls_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_youtube_oembed(url: str, **kwargs: object) -> dict[str, object]:
+        assert url == youtube.OEMBED_URL
+        assert kwargs["params"] == {
+            "url": "https://www.youtube.com/watch?v=abc_def-1234",
+            "format": "json",
+        }
+        return {"type": "video", "title": "Public video", "author_name": "Public channel"}
+
+    monkeypatch.setattr(youtube, "get_json", fake_youtube_oembed)
+    service = ReachService(build_registry(), config={})
+    result = await service.read("https://youtu.be/abc_def-1234?t=5")
+
+    assert result["platform"] == "youtube"
+    assert result["title"] == "Public video"
+    assert result["author"] == "Public channel"
+    assert result["access"] == {"mode": "anonymous", "complete": False}
+
+
 def test_discord_adapter_requires_explicit_channel_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DISCORD_ALLOWED_CHANNEL_IDS", "222222222222222222,333333333333333333")
     registry = build_registry()

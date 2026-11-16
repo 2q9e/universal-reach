@@ -61,6 +61,7 @@ universal-reach search --platform github --query "mcp server"
 universal-reach search --platform hackernews --query "mcp server" --options '{"sort":"recent","tags":"story"}'
 universal-reach search-multi --query "public transit" --platform bluesky --platform github
 universal-reach read --url https://github.com/modelcontextprotocol/python-sdk
+universal-reach read --url 'https://youtu.be/M7lc1UVf-VE'
 universal-reach replies --url https://news.ycombinator.com/item?id=1 --platform hackernews
 universal-reach profile --platform github --username octocat
 universal-reach health-check --platform bluesky
@@ -79,6 +80,8 @@ universal-reach search --platform steam --query "patch" --options '{"app_id":"48
 ```
 
 Hacker News search uses the anonymous Algolia HN Search API (`sort` is `relevance` or `recent`; optional `tags` and `numeric_filters` follow the API's documented filters). Its cursor is a zero-based page number, and requests share the service's published limit of 10,000 per IP per hour. Exact reads, replies, and profile data continue to use the official Firebase API.
+
+YouTube exact reads use its public oEmbed endpoint and return only limited video metadata (title, author, and a validated thumbnail URL); the channel Atom feed returns recent uploads. Neither route provides full channel history, comments, captions, or search.
 
 Owner-authorized Meta reads use environment variables and accept only the configured account:
 
@@ -158,7 +161,7 @@ The table describes operations present in this source release. A check means an 
 | Bogleheads | Partial | — | ✓ | — | — | — | Anonymous exact-post reads only when the post is in the bounded topic Atom feed |
 | Facebook | Restricted | — | — | — | — | ✓ | Configured Page token, `pages_read_engagement`, `pages_read_user_content`, and Page `MODERATE` task; approximately 600 ranked published posts/year |
 | Instagram | Restricted | — | — | — | ✓ | ✓ | Configured professional account only; Graph API scopes and app access apply; at most 10,000 recent media items |
-| YouTube | Partial | — | — | — | — | ✓ | Anonymous recent channel Atom feed; broader Data API access requires a Google API key |
+| YouTube | Partial | — | ✓ | — | — | ✓ | Anonymous oEmbed metadata and recent channel Atom feed; broader Data API access requires a Google API key |
 | WhatsApp | Restricted | — | — | — | — | — | Channel updates are public to visitors, but no automated public API/feed was verified; Business API requires a bearer token |
 | TikTok | Partial | — | — | — | ✓ | ✓ | OAuth token for the owner account; Display API scopes and app approval required |
 | WeChat | Restricted | — | — | — | — | — | Official account API requires onboarding, IP allowlisting, app credentials, and access tokens |
@@ -245,7 +248,7 @@ Adapter routes and access declarations are based on the platforms' published doc
 - [Bluesky HTTP API](https://docs.bsky.app/docs/api/app-bsky-feed-get-feed)
 - [Reddit Data API Wiki](https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki) and [Responsible Builder Policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy)
 - [Telegram channel previews](https://telegram.org/tour/channels)
-- [YouTube channel Atom feed](https://developers.google.com/youtube/data/guides/push_notifications)
+- [YouTube channel Atom feed](https://developers.google.com/youtube/data/guides/push_notifications) and [YouTube oEmbed provider endpoint](https://oembed.org/providers/youtube)
 - [V2EX API 2.0](https://edge.v2ex.com/help/api) and [legacy profile API](https://www.v2ex.com/p/7v9tec53)
 - [Bogleheads Atom feed announcement](https://www.bogleheads.org/forum/viewtopic.php?p=3123123)
 - [Steamworks Events and Announcements RSS guidance](https://partner.steamgames.com/doc/marketing/event_tools), [Steam Web API](https://steamcommunity.com/dev), [ISteamNews interface](https://partner.steamgames.com/doc/webapi/ISteamNews), and [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/)

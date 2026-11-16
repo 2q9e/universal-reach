@@ -40,16 +40,132 @@ def _entry(video_id: str, title: str, *, channel_id: str = CHANNEL_ID, published
 @pytest.mark.asyncio
 async def test_health_check_reads_public_channel_feed(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
+    json_calls: list[dict[str, object]] = []
 
     async def fake_get_text(url: str, **kwargs: object) -> str:
         calls.append(kwargs)
         return _feed()
 
+    async def fake_get_json(url: str, **kwargs: object) -> dict[str, object]:
+        json_calls.append(kwargs)
+        return {"type": "video", "title": "Health check", "author_name": "YouTube"}
+
     monkeypatch.setattr(youtube, "get_text", fake_get_text)
+    monkeypatch.setattr(youtube, "get_json", fake_get_json)
     result = await YouTubeAdapter().health_check()
     assert result.status == "available"
     assert result.access_mode == "anonymous"
     assert calls[0]["params"] == {"channel_id": youtube._HEALTH_CHANNEL_ID}
+    assert json_calls[0]["params"] == {
+        "url": "https://www.youtube.com/watch?v=M7lc1UVf-VE",
+        "format": "json",
+    }
+
+
+@pytest.mark.asyncio
+async def test_health_check_describes_partial_and_rate_limited_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = {"feed_error": None, "oembed_error": "network_error"}
+
+    async def fake_get_text(url: str, **kwargs: object) -> str:
+        if state["feed_error"]:
+            raise ReachError(str(state["feed_error"]), "feed check failed")
+        return _feed()
+
+    async def fake_get_json(url: str, **kwargs: object) -> dict[str, object]:
+        if state["oembed_error"]:
+            raise ReachError(str(state["oembed_error"]), "oEmbed check failed")
+        return {"type": "video", "title": "Health check"}
+
+    monkeypatch.setattr(youtube, "get_text", fake_get_text)
+    monkeypatch.setattr(youtube, "get_json", fake_get_json)
+    adapter = YouTubeAdapter()
+
+    partial = await adapter.health_check()
+    assert partial.status == "degraded"
+    assert "Only one YouTube source responded" in partial.message
+
+    state.update(feed_error="rate_limited", oembed_error="network_error")
+    rate_limited = await adapter.health_check()
+    assert rate_limited.status == "degraded"
+    assert "Both YouTube source checks failed" in rate_limited.message
+
+
+@pytest.mark.asyncio
+async def test_read_returns_limited_public_oembed_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_get_json(url: str, **kwargs: object) -> dict[str, object]:
+        calls.append((url, kwargs))
+        assert url == youtube.OEMBED_URL
+        assert kwargs["allowed_hosts"] == youtube.OEMBED_HOSTS
+        return {
+            "type": "video",
+            "provider_name": "YouTube",
+            "title": "Example video",
+            "author_name": "Example channel",
+            "thumbnail_url": "https://i.ytimg.com/vi/abc_def-1234/hqdefault.jpg",
+            "thumbnail_width": 480,
+            "thumbnail_height": 360,
+            "html": "<iframe>untrusted embed markup is not returned</iframe>",
+        }
+
+    monkeypatch.setattr(youtube, "get_json", fake_get_json)
+    record = await YouTubeAdapter().read("https://youtu.be/abc_def-1234?t=5")
+
+    assert calls == [
+        (
+            youtube.OEMBED_URL,
+            {
+                "allowed_hosts": youtube.OEMBED_HOSTS,
+                "params": {"url": "https://www.youtube.com/watch?v=abc_def-1234", "format": "json"},
+            },
+        )
+    ]
+    assert record.type == "video"
+    assert record.id == "abc_def-1234"
+    assert record.url == "https://www.youtube.com/watch?v=abc_def-1234"
+    assert record.title == "Example video"
+    assert record.author == "Example channel"
+    assert record.text is None
+    assert record.access.mode == "anonymous"
+    assert record.access.complete is False
+    assert record.extensions["metadata_source"] == "youtube_oembed"
+    assert record.media[0].url == "https://i.ytimg.com/vi/abc_def-1234/hqdefault.jpg"
+    assert record.media[0].metadata == {"width": 480, "height": 360}
+    assert "iframe" not in str(record.to_dict())
+
+
+@pytest.mark.asyncio
+async def test_read_rejects_invalid_video_urls_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fail_if_called(url: str, **kwargs: object) -> object:
+        pytest.fail("invalid video URLs must not reach YouTube")
+
+    monkeypatch.setattr(youtube, "get_json", fail_if_called)
+    adapter = YouTubeAdapter()
+    for url in (
+        "http://www.youtube.com/watch?v=abc_def-1234",
+        "https://example.com/watch?v=abc_def-1234",
+        "https://www.youtube.com/playlist?list=abc_def-1234",
+        "https://youtu.be/../watch",
+    ):
+        with pytest.raises(ReachError):
+            await adapter.read(url)
+
+
+@pytest.mark.asyncio
+async def test_read_ignores_thumbnail_urls_from_unexpected_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_get_json(url: str, **kwargs: object) -> dict[str, object]:
+        return {
+            "type": "video",
+            "title": "Example video",
+            "thumbnail_url": "https://attacker.example/image.jpg",
+        }
+
+    monkeypatch.setattr(youtube, "get_json", fake_get_json)
+    record = await YouTubeAdapter().read("https://www.youtube.com/watch?v=abc_def-1234")
+
+    assert record.title == "Example video"
+    assert record.media == []
 
 
 @pytest.mark.asyncio
@@ -66,7 +182,7 @@ async def test_profile_posts_reads_documented_feed_and_normalizes_entries(monkey
     result = await adapter.profile_posts(CHANNEL_ID, limit=1)
 
     assert adapter.platform == "youtube"
-    assert adapter.capability.operations == ("profile_posts",)
+    assert adapter.capability.operations == ("read", "profile_posts")
     assert calls == [
         (
             FEED_URL,
