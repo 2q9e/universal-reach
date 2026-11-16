@@ -106,6 +106,25 @@ async def test_multi_search_includes_public_hackernews_search(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
+async def test_hackernews_feed_is_available_through_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def hn_feed_json(url: str, **kwargs: object) -> object:
+        if url.endswith("/topstories.json"):
+            return [101]
+        if url.endswith("/item/101.json"):
+            return {"id": 101, "type": "story", "title": "Front page item", "by": "reader"}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(hackernews, "get_json", hn_feed_json)
+    service = ReachService(build_registry(), config={})
+    result = await service.feed("hackernews", "top", limit=1)
+
+    assert result["operation"] == "feed"
+    assert result["extensions"]["source"] == "hackernews_firebase"
+    assert result["items"][0]["title"] == "Front page item"
+    assert result["items"][0]["access"] == {"mode": "anonymous", "complete": True}
+
+
+@pytest.mark.asyncio
 async def test_status_does_not_claim_live_health_and_lists_all_platforms() -> None:
     service = ReachService(build_registry(), config={})
     status = await service.platform_status()
@@ -210,12 +229,33 @@ async def test_real_mcp_client_protocol_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mcp_hackernews_feed_tool_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp import Client
+
+    async def hn_feed_json(url: str, **kwargs: object) -> object:
+        if url.endswith("/newstories.json"):
+            return [321]
+        if url.endswith("/item/321.json"):
+            return {"id": 321, "type": "story", "title": "Newest story"}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(hackernews, "get_json", hn_feed_json)
+    server = create_mcp_server(ReachService(build_registry(), config={}))
+    async with Client(server, mode="legacy") as client:
+        result = await client.call_tool("feed", {"platform": "hackernews", "category": "new", "limit": 1})
+
+    assert result.is_error is False
+    assert result.structured_content["operation"] == "feed"
+    assert result.structured_content["items"][0]["title"] == "Newest story"
+
+
+@pytest.mark.asyncio
 async def test_mcp_registers_expected_tools_and_marks_errors() -> None:
     server = create_mcp_server(ReachService(build_registry(), config={}))
     tools = await server.list_tools()
     names = {tool.name for tool in tools}
     assert names == {
-        "platforms_list", "platform_status", "search", "search_multi", "read",
+        "platforms_list", "platform_status", "feed", "search", "search_multi", "read",
         "replies", "profile", "profile_posts", "media", "transcript", "archive", "health_check",
     }
 
@@ -272,7 +312,11 @@ def test_config_rejects_credentials_and_writes_private_file(tmp_path) -> None:
 def test_cli_json_and_hackernews_search(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     from universal_reach.cli import main
 
-    async def hn_search_json(url: str, **kwargs: object) -> dict[str, object]:
+    async def hn_search_json(url: str, **kwargs: object) -> object:
+        if url.endswith("/topstories.json"):
+            return [123]
+        if url.endswith("/item/123.json"):
+            return {"id": 123, "type": "story", "title": "CLI feed item"}
         return {"hits": [], "nbHits": 0, "nbPages": 0, "hitsPerPage": 10}
 
     monkeypatch.setattr(hackernews, "get_json", hn_search_json)
@@ -285,6 +329,11 @@ def test_cli_json_and_hackernews_search(capsys: pytest.CaptureFixture[str], monk
     search_result = json.loads(capsys.readouterr().out)
     assert search_result["operation"] == "search"
     assert search_result["extensions"]["source"] == "hn_search_algolia"
+
+    assert main(["feed", "--platform", "hackernews", "--category", "top", "--limit", "1"]) == 0
+    feed_result = json.loads(capsys.readouterr().out)
+    assert feed_result["operation"] == "feed"
+    assert feed_result["items"][0]["title"] == "CLI feed item"
 
     assert main(["--format", "jsonl", "search-multi", "--query", "example", "--platform", "hackernews"]) == 0
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]

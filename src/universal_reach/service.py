@@ -66,6 +66,21 @@ class ReachService:
     def platforms_list(self) -> list[dict[str, object]]:
         return self.registry.capabilities()
 
+    async def feed(
+        self, platform: str, category: str, limit: int = 20, cursor: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        limit = validate_limit(limit)
+        if not isinstance(platform, str) or not platform.strip():
+            raise ReachError("invalid_argument", "platform must be a non-empty string.")
+        if not isinstance(category, str) or not category.strip() or len(category) > 64:
+            raise ReachError("invalid_argument", "category must contain 1 to 64 characters.")
+        if cursor is not None and (not isinstance(cursor, str) or len(cursor) > 2048):
+            raise ReachError("invalid_argument", "cursor must be a string of at most 2048 characters.")
+        adapter = self.registry.get(platform)
+        page = await adapter.feed(category.strip(), limit, cursor, self._adapter_options(adapter.platform, options))
+        return page.to_dict()
+
     async def platform_status(self, platform: str | None = None) -> dict[str, Any]:
         if platform is not None and not isinstance(platform, str):
             raise ReachError("invalid_argument", "platform must be a string.")

@@ -55,6 +55,17 @@ def create_mcp_server(service: ReachService | None = None) -> MCPServer:
         return await _execute(lambda: service.platform_status(platform))
 
     @mcp.tool()
+    async def feed(
+        platform: str,
+        category: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> CallToolResult:
+        """Retrieve a public ranked or recent feed where the platform supports one."""
+        return await _execute(lambda: service.feed(platform, category, limit, cursor, options))
+
+    @mcp.tool()
     async def search(
         platform: str,
         query: str,

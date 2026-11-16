@@ -44,6 +44,12 @@ class Adapter:
     ) -> ResultPage:
         raise UnsupportedOperation(self.platform, "profile_posts")
 
+    async def feed(
+        self, category: str, limit: int = 20, cursor: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> ResultPage:
+        raise UnsupportedOperation(self.platform, "feed")
+
     async def media(self, url: str, options: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         raise UnsupportedOperation(self.platform, "media")
 

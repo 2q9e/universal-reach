@@ -46,6 +46,89 @@ async def test_read_normalizes_public_item(monkeypatch: pytest.MonkeyPatch, adap
 
 
 @pytest.mark.asyncio
+async def test_feed_normalizes_top_stories_and_paginates(monkeypatch: pytest.MonkeyPatch, adapter: HackerNewsAdapter) -> None:
+    calls: list[str] = []
+
+    async def fake_get_json(url: str, **kwargs: object) -> dict[str, object] | list[int]:
+        calls.append(url)
+        if url.endswith("/topstories.json"):
+            return [101, 102, 103]
+        item_id = int(url.rsplit("/item/", 1)[1].removesuffix(".json"))
+        return {"id": item_id, "type": "story", "title": f"Story {item_id}", "by": "reader"}
+
+    monkeypatch.setattr(hackernews, "get_json", fake_get_json)
+    first = await adapter.feed("TOP", limit=2)
+    second = await adapter.feed("top", limit=2, cursor=first.pagination.cursor)
+
+    assert adapter.capability.operations[0] == "feed"
+    assert [item.id for item in first.items] == ["101", "102"]
+    assert first.pagination.cursor == "2"
+    assert first.pagination.has_more is True
+    assert first.complete is False
+    assert first.extensions == {
+        "category": "top",
+        "source": "hackernews_firebase",
+        "feed_entry_count": 3,
+        "source_item_count": 3,
+    }
+    assert [item.id for item in second.items] == ["103"]
+    assert second.pagination.cursor is None
+    assert second.pagination.has_more is False
+    assert second.complete is True
+    assert calls.count(f"{hackernews.API_BASE}/topstories.json") == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "category,endpoint",
+    [
+        ("top", "topstories"),
+        ("new", "newstories"),
+        ("best", "beststories"),
+        ("ask", "askstories"),
+        ("show", "showstories"),
+        ("job", "jobstories"),
+    ],
+)
+async def test_feed_categories_use_official_firebase_lists(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: HackerNewsAdapter,
+    category: str,
+    endpoint: str,
+) -> None:
+    calls: list[str] = []
+
+    async def fake_get_json(url: str, **kwargs: object) -> list[object]:
+        calls.append(url)
+        return []
+
+    monkeypatch.setattr(hackernews, "get_json", fake_get_json)
+    result = await adapter.feed(category)
+
+    assert calls == [f"{hackernews.API_BASE}/{endpoint}.json"]
+    assert result.extensions["category"] == category
+    assert result.items == []
+
+
+@pytest.mark.asyncio
+async def test_feed_rejects_unknown_category_cursor_and_options_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: HackerNewsAdapter,
+) -> None:
+    async def fail_if_called(*args: object, **kwargs: object) -> object:
+        raise AssertionError("invalid feed input must not reach the network")
+
+    monkeypatch.setattr(hackernews, "get_json", fail_if_called)
+    for category, cursor, options in (
+        ("popular", None, None),
+        ("top", 1, None),
+        ("top", None, {"query": "ignored"}),
+    ):
+        with pytest.raises(ReachError):
+            await adapter.feed(category, cursor=cursor, options=options)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("item", [None, {"id": 123, "type": "story", "deleted": True}, {"id": 123, "type": "story", "dead": True}])
 async def test_read_returns_not_found_for_missing_or_deleted_items(
     monkeypatch: pytest.MonkeyPatch,

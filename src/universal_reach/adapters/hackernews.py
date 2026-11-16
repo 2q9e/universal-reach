@@ -23,7 +23,16 @@ _ID_RE = re.compile(r"^[1-9][0-9]{0,15}$")
 _USER_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _SEARCH_TAGS_RE = re.compile(r"^[A-Za-z0-9_(),-]{1,256}$")
 _NUMERIC_FILTER_RE = re.compile(r"^(?:created_at_i|points|num_comments)(?:<=|>=|=|<|>)[0-9]{1,12}$")
+_FEED_ENDPOINTS = {
+    "top": "topstories",
+    "new": "newstories",
+    "best": "beststories",
+    "ask": "askstories",
+    "show": "showstories",
+    "job": "jobstories",
+}
 MAX_LIMIT = 100
+_MAX_FEED_IDS = 500
 _CHILD_FETCH_CONCURRENCY = 8
 
 
@@ -39,8 +48,67 @@ class HackerNewsAdapter(Adapter):
     url_hosts = URL_HOSTS
 
     def __init__(self) -> None:
-        operations = ("search", "read", "replies", "profile", "profile_posts")
+        operations = ("feed", "search", "read", "replies", "profile", "profile_posts")
         super().__init__(adapter_capability("hackernews", operations))
+
+    async def feed(
+        self, category: str, limit: int = 20, cursor: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> ResultPage:
+        limit = self._validated_limit(limit)
+        offset = self._validated_cursor(cursor)
+        if not isinstance(category, str) or not category.strip():
+            raise ReachError("invalid_input", "Choose a Hacker News feed category.")
+        category = category.strip().casefold()
+        endpoint = _FEED_ENDPOINTS.get(category)
+        if endpoint is None:
+            raise ReachError(
+                "invalid_input",
+                "Hacker News feed category must be top, new, best, ask, show, or job.",
+                details={"category": category},
+            )
+        if options is not None and not isinstance(options, dict):
+            raise ReachError("invalid_option", "Hacker News feed options must be an object.")
+        if options:
+            raise ReachError("invalid_option", "Hacker News feeds do not accept additional options.")
+
+        raw_ids = await get_json(f"{API_BASE}/{endpoint}.json", allowed_hosts=API_HOSTS)
+        if not isinstance(raw_ids, list):
+            raise ReachError("parser_error", "The Hacker News API returned an invalid feed ID list.")
+        ids: list[int] = []
+        warnings: list[str] = []
+        for item_id in raw_ids:
+            if isinstance(item_id, int) and not isinstance(item_id, bool) and item_id > 0:
+                ids.append(item_id)
+            else:
+                warnings.append("An invalid item ID in the Hacker News feed was skipped.")
+        if len(ids) > _MAX_FEED_IDS:
+            ids = ids[:_MAX_FEED_IDS]
+            warnings.append("The Hacker News feed exceeded the 500-item processing limit and was truncated.")
+
+        selected_ids = ids[offset:offset + limit]
+        items, fetch_warnings = await self._get_items(selected_ids, item_label="Feed item") if selected_ids else ([], [])
+        warnings.extend(fetch_warnings)
+        next_offset = offset + len(selected_ids)
+        has_more = next_offset < len(ids)
+        return ResultPage(
+            platform=self.platform,
+            operation="feed",
+            items=[self._record(item) for item in items],
+            pagination=Pagination(
+                cursor=str(next_offset) if has_more else None,
+                has_more=has_more,
+                detail="Cursor is an offset into the current Firebase feed ID list; rankings can shift between requests.",
+            ),
+            complete=not warnings and not has_more,
+            warnings=warnings,
+            extensions={
+                "category": category,
+                "source": "hackernews_firebase",
+                "feed_entry_count": len(ids),
+                "source_item_count": len(raw_ids),
+            },
+        )
 
     @staticmethod
     def _search_page(cursor: str | None) -> int:
@@ -325,14 +393,16 @@ class HackerNewsAdapter(Adapter):
     def _validated_cursor(cursor: str | None) -> int:
         if cursor is None:
             return 0
-        if not cursor.isdecimal():
+        if not isinstance(cursor, str) or not cursor.isascii() or not cursor.isdecimal():
             raise ReachError("invalid_input", "The Hacker News cursor must be a non-negative offset.")
         offset = int(cursor)
         if offset > 1_000_000:
             raise ReachError("invalid_input", "The Hacker News cursor is outside the supported range.")
         return offset
 
-    async def _get_items(self, item_ids: list[int]) -> tuple[list[dict[str, Any]], list[str]]:
+    async def _get_items(
+        self, item_ids: list[int], *, item_label: str = "Item",
+    ) -> tuple[list[dict[str, Any]], list[str]]:
         semaphore = asyncio.Semaphore(_CHILD_FETCH_CONCURRENCY)
 
         async def fetch(item_id: int) -> dict[str, Any] | None:
@@ -345,9 +415,9 @@ class HackerNewsAdapter(Adapter):
         warnings: list[str] = []
         for item_id, value in zip(item_ids, values, strict=True):
             if isinstance(value, Exception):
-                warnings.append(f"Comment {item_id} could not be retrieved.")
+                warnings.append(f"{item_label} {item_id} could not be retrieved.")
             elif value is None or value.get("deleted") or value.get("dead"):
-                warnings.append(f"Comment {item_id} is missing or deleted.")
+                warnings.append(f"{item_label} {item_id} is missing or deleted.")
             else:
                 items.append(value)
         return items, warnings
@@ -365,7 +435,7 @@ class HackerNewsAdapter(Adapter):
         raw_kids = parent.get("kids")
         kids = [kid for kid in raw_kids if isinstance(kid, int) and not isinstance(kid, bool) and kid > 0] if isinstance(raw_kids, list) else []
         selected_ids = kids[offset:offset + limit]
-        raw_items, warnings = await self._get_items(selected_ids) if selected_ids else ([], [])
+        raw_items, warnings = await self._get_items(selected_ids, item_label="Comment") if selected_ids else ([], [])
         next_offset = offset + len(selected_ids)
         has_more = next_offset < len(kids)
         page = ResultPage(
@@ -429,7 +499,7 @@ class HackerNewsAdapter(Adapter):
         submitted = user.get("submitted") if isinstance(user.get("submitted"), list) else []
         ids = [item_id for item_id in submitted if isinstance(item_id, int) and not isinstance(item_id, bool) and item_id > 0]
         selected_ids = ids[offset:offset + limit]
-        items, warnings = await self._get_items(selected_ids) if selected_ids else ([], [])
+        items, warnings = await self._get_items(selected_ids, item_label="Submitted item") if selected_ids else ([], [])
         next_offset = offset + len(selected_ids)
         has_more = next_offset < len(ids)
         return ResultPage(

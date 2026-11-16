@@ -56,6 +56,7 @@ Commands return JSON by default. Use `--format jsonl` before the subcommand to e
 ```sh
 universal-reach platforms
 universal-reach status --platform bluesky
+universal-reach feed --platform hackernews --category top --limit 20
 universal-reach search --platform bluesky --query "public transit"
 universal-reach search --platform github --query "mcp server"
 universal-reach search --platform hackernews --query "mcp server" --options '{"sort":"recent","tags":"story"}'
@@ -82,6 +83,8 @@ universal-reach search --platform steam --query "patch" --options '{"app_id":"48
 Hacker News search uses the anonymous Algolia HN Search API (`sort` is `relevance` or `recent`; optional `tags` and `numeric_filters` follow the API's documented filters). Its cursor is a zero-based page number, and requests share the service's published limit of 10,000 per IP per hour. Exact reads, replies, and profile data continue to use the official Firebase API.
 
 YouTube exact reads use its public oEmbed endpoint and return only limited video metadata (title, author, and a validated thumbnail URL); the channel Atom feed returns recent uploads. Neither route provides full channel history, comments, captions, or search.
+
+Hacker News `feed` supports `top`, `new`, `best`, `ask`, `show`, and `job` categories from the public Firebase API. Its cursor is an offset into the current ID list, so rankings can shift between requests. Feed item reads use bounded concurrency.
 
 Owner-authorized Meta reads use environment variables and accept only the configured account:
 
@@ -133,7 +136,7 @@ Claude Code:
 claude mcp add --transport stdio universal-reach -- /absolute/path/to/universal-reach/.venv/bin/universal-reach mcp
 ```
 
-The MCP server exposes `platforms_list`, `platform_status`, `search`, `search_multi`, `read`, `replies`, `profile`, `profile_posts`, `media`, `transcript`, `archive`, and `health_check`. Unsupported operations return MCP tool errors rather than invented data. `platform_status` does not contact upstream services; `health_check` does.
+The MCP server exposes `platforms_list`, `platform_status`, `feed`, `search`, `search_multi`, `read`, `replies`, `profile`, `profile_posts`, `media`, `transcript`, `archive`, and `health_check`. Unsupported operations return MCP tool errors rather than invented data. `platform_status` does not contact upstream services; `health_check` does.
 
 ## Platform capability matrix
 
@@ -148,7 +151,7 @@ The table describes operations present in this source release. A check means an 
 | GitHub | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; unauthenticated rate limits apply |
 | Steam Community | Partial | ✓ | — | — | — | — | Partial; searches current per-game announcement RSS entries only; discussions are unsupported |
 | 4chan | Partial | Limited† | ✓ | ✓ | — | — | Yes; public JSON API |
-| Hacker News | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; Algolia HN Search plus official Firebase API |
+| Hacker News | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; Algolia search and Firebase feeds, item reads, comments, and profiles |
 | XDA Forums | Restricted | — | — | — | — | — | Valnet Terms cover forums/RSS and prohibit automated crawling or content extraction |
 | V2EX | Partial | — | ✓ | ✓ | ✓ | — | Public profile route is anonymous; topic and replies routes require V2EX_ACCESS_TOKEN |
 | Zhihu | Restricted | — | — | — | — | — | Official search requires Access Secret and timestamp; response contract/quota not verified |
@@ -178,6 +181,8 @@ The table describes operations present in this source release. A check means an 
 | Bluesky | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes through public AppView GET endpoints |
 
 `—` means not implemented, rather than a claim that the platform itself lacks the capability. `*` Discord’s adapter is registered only when `DISCORD_ALLOWED_CHANNEL_IDS` contains one or more channel snowflakes. `†` 4chan search is limited to matching preview text in the active catalog of one explicitly selected board; it is not global full-text search. Hacker News search uses the separate public Algolia HN Search index; exact reads, replies, and profiles use the official Firebase API. Search completeness and availability depend on the index and its published limits. Lemmy and Discourse need an instance URL and only return content visible to anonymous visitors. Facebook, Instagram, Threads, and TikTok use owner-authorized APIs and do not provide anonymous access in this release.
+
+The generic `feed` operation is currently implemented for Hacker News only, with `top`, `new`, `best`, `ask`, `show`, and `job` categories.
 
 ### Other operations
 

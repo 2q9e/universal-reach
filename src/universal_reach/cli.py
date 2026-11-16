@@ -26,6 +26,13 @@ def _parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="Show configured adapter status without contacting platforms.")
     status.add_argument("--platform")
 
+    feed = sub.add_parser("feed", help="Read a platform feed where one is supported.")
+    feed.add_argument("--platform", required=True)
+    feed.add_argument("--category", required=True)
+    feed.add_argument("--limit", type=int, default=20)
+    feed.add_argument("--cursor")
+    _options_argument(feed)
+
     search = sub.add_parser("search", help="Search one platform.")
     search.add_argument("--platform", required=True)
     search.add_argument("--query", required=True)
@@ -147,6 +154,8 @@ async def _dispatch(args: argparse.Namespace, service: ReachService) -> Any:
         return await service.health_check(args.platforms)
 
     options = _parse_options(getattr(args, "options", None))
+    if command == "feed":
+        return await service.feed(args.platform, args.category, args.limit, args.cursor, options)
     if command == "search":
         return await service.search(args.platform, args.query, args.limit, args.cursor, options)
     if command == "search-multi":
