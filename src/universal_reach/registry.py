@@ -90,7 +90,7 @@ class AdapterRegistry:
                     operations=list(adapter.capability.operations),
                     access_mode=(
                         "anonymous"
-                        if capability.anonymous_access == "yes"
+                        if capability.anonymous_access in {"yes", "partial"}
                         else "unknown"
                     ),
                 )

@@ -1,4 +1,4 @@
-"""Deterministic tests for the read-only official X API adapter."""
+"""Deterministic tests for anonymous oEmbed and read-only X API access."""
 
 import asyncio
 from collections.abc import Mapping
@@ -85,7 +85,7 @@ def test_adapter_advertises_search_and_read_only() -> None:
     adapter = XAdapter()
     assert adapter.platform == "x"
     assert adapter.capability.operations == ("search", "read")
-    assert adapter.capability.anonymous_access == "no"
+    assert adapter.capability.anonymous_access == "partial"
 
 
 def test_search_requires_env_token_and_paid_read_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,7 +165,7 @@ def test_search_rejects_unsupported_low_limit_and_bad_query(monkeypatch: pytest.
     assert bad_query.value.code == "invalid_query"
 
 
-def test_read_uses_only_the_id_from_a_supported_x_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_read_api_mode_uses_only_the_id_from_a_supported_x_url(monkeypatch: pytest.MonkeyPatch) -> None:
     token = enable_api(monkeypatch)
 
     async def handler(call: dict[str, Any]) -> dict[str, Any]:
@@ -178,13 +178,81 @@ def test_read_uses_only_the_id_from_a_supported_x_url(monkeypatch: pytest.Monkey
         return post_payload()
 
     calls = install_get(monkeypatch, handler)
-    record = run(XAdapter().read("https://twitter.com/alice/status/1234567890?s=20#ignored"))
+    record = run(XAdapter().read("https://twitter.com/alice/status/1234567890?s=20#ignored", {"auth_mode": "api"}))
 
     assert len(calls) == 1
     assert record.id == "1234567890"
     assert record.platform == "x"
     assert record.type == "post"
     assert record.access.mode == "authenticated"
+
+
+def test_read_defaults_to_public_oembed_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("X_API_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("X_API_ALLOW_PAID_READS", raising=False)
+
+    async def handler(call: dict[str, Any]) -> dict[str, Any]:
+        assert call["url"] == x.OEMBED_URL
+        assert call["allowed_hosts"] == x.OEMBED_HOSTS
+        assert call["params"] == {
+            "url": "https://x.com/i/web/status/1234567890",
+            "omit_script": "true",
+            "hide_thread": "true",
+        }
+        assert call["headers"] == {}
+        assert call["retries"] == 0
+        return {
+            "type": "rich",
+            "provider_name": "Twitter",
+            "url": "https://twitter.com/Alice_42/status/1234567890",
+            "author_name": "Alice",
+            "author_url": "https://twitter.com/Alice_42",
+            "html": '<blockquote><p>Public &amp; safe<br>next<script>secret()</script></p></blockquote><script>omit()</script>',
+        }
+
+    calls = install_get(monkeypatch, handler)
+    record = run(XAdapter().read("https://x.com/alice/status/1234567890"))
+
+    assert len(calls) == 1
+    assert record.id == "1234567890"
+    assert record.url == "https://x.com/i/web/status/1234567890"
+    assert record.author == "@Alice_42"
+    assert record.text == "Public & safe\nnext"
+    assert record.access.mode == "anonymous"
+    assert record.access.complete is False
+    assert record.extensions == {"metadata_source": "x_oembed", "author_handle": "Alice_42"}
+    assert "script" not in repr(record.to_dict())
+
+
+def test_anonymous_oembed_rejects_mismatched_response_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = install_get(
+        monkeypatch,
+        lambda _call: asyncio.sleep(0, result={
+            "type": "rich",
+            "url": "https://x.com/other/status/999",
+            "author_name": "Other",
+            "html": "<blockquote><p>Wrong post</p></blockquote>",
+        }),
+    )
+
+    with pytest.raises(ReachError) as caught:
+        run(XAdapter().read("https://x.com/alice/status/123"))
+
+    assert caught.value.code == "parser_error"
+    assert len(calls) == 1
+
+
+def test_read_options_select_paid_api_explicitly_and_reject_unknown_modes(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = install_get(monkeypatch, lambda _call: pytest.fail("invalid mode must not make a request"))
+
+    with pytest.raises(ReachError) as invalid_mode:
+        run(XAdapter().read("https://x.com/alice/status/123", {"auth_mode": "browser"}))
+    assert invalid_mode.value.code == "invalid_option"
+
+    with pytest.raises(ReachError) as unknown_option:
+        run(XAdapter().read("https://x.com/alice/status/123", {"cookies": "never"}))
+    assert unknown_option.value.code == "invalid_option"
+    assert calls == []
 
 
 @pytest.mark.parametrize(
@@ -280,4 +348,17 @@ def test_health_check_never_makes_a_live_call(monkeypatch: pytest.MonkeyPatch) -
     assert status.access_mode == "authenticated"
     assert "no live API call was made" in status.message
     assert token not in status.message
+    assert calls == []
+
+
+def test_health_check_reports_anonymous_read_mode_without_api_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("X_API_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("X_API_ALLOW_PAID_READS", raising=False)
+    calls = install_get(monkeypatch, lambda _call: pytest.fail("health check must not call X"))
+
+    status = run(XAdapter().health_check())
+
+    assert status.status == "degraded"
+    assert status.access_mode == "anonymous"
+    assert "Anonymous exact-post reads use X oEmbed" in status.message
     assert calls == []

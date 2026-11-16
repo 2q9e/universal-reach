@@ -23,11 +23,11 @@ def test_platform_catalog_and_loaded_adapters_are_truthful(monkeypatch: pytest.M
     assert len(catalog) == 35
     assert len({item["id"] for item in catalog}) == 35
     implemented = [item for item in catalog if item["operations"]]
-    assert len(implemented) == 20
+    assert len(implemented) == 21
     assert {item["id"] for item in implemented} == {
         "github", "stackoverflow", "stackexchange", "hackernews", "v2ex",
         "bogleheads", "reddit", "telegram", "youtube", "x", "4chan", "lemmy",
-        "discourse", "devto", "bluesky", "facebook", "instagram", "threads", "tiktok", "steam",
+        "discourse", "devto", "bluesky", "facebook", "instagram", "threads", "tiktok", "steam", "pinterest",
     }
     assert all(item["status"] in {"partial", "restricted"} for item in implemented)
 
@@ -44,11 +44,31 @@ def test_single_capability_lookup_returns_registered_adapter_capability() -> Non
     assert quora.operations == ()
 
 
-def test_youtube_short_video_urls_resolve_to_the_public_adapter() -> None:
+def test_partial_anonymous_capability_is_reflected_by_status() -> None:
+    registry = build_registry()
+    status = asyncio.run(registry.status("x"))
+
+    assert status[0]["access_mode"] == "anonymous"
+
+
+def test_supported_social_urls_resolve_to_adapters() -> None:
     registry = build_registry()
 
     assert registry.for_url("https://youtu.be/abc_def-1234").platform == "youtube"
     assert registry.for_url("https://www.youtube.com/shorts/abc_def-1234").platform == "youtube"
+    assert registry.for_url("https://x.com/Interior/status/1234567890").platform == "x"
+    assert registry.for_url("https://twitter.com/Interior/status/1234567890").platform == "x"
+    assert registry.for_url("https://www.pinterest.com/pin/1234567890/").platform == "pinterest"
+
+
+def test_pinterest_capability_is_account_scoped_and_authenticated() -> None:
+    capability = build_registry().capability("pinterest")
+
+    assert capability.status == "partial"
+    assert capability.operations == ("read", "profile", "profile_posts")
+    assert capability.anonymous_access == "no"
+    assert "uncached API calls" in capability.notes
+    assert "specified-service exception" in capability.notes
 
 
 @pytest.mark.asyncio
@@ -69,6 +89,68 @@ async def test_service_reads_youtube_short_urls_without_credentials(monkeypatch:
     assert result["title"] == "Public video"
     assert result["author"] == "Public channel"
     assert result["access"] == {"mode": "anonymous", "complete": False}
+
+
+@pytest.mark.asyncio
+async def test_service_reads_public_tiktok_video_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_tiktok_oembed(url: str, **kwargs: object) -> dict[str, object]:
+        assert url == tiktok.OEMBED_URL
+        assert kwargs == {
+            "allowed_hosts": tiktok.OEMBED_HOSTS,
+            "params": {"url": "https://www.tiktok.com/@creator/video/12345"},
+        }
+        return {
+            "type": "video",
+            "provider_name": "TikTok",
+            "embed_product_id": "12345",
+            "title": "Public TikTok video",
+            "author_name": "Creator",
+            "html": "<iframe>must not be returned</iframe>",
+        }
+
+    monkeypatch.setattr(tiktok, "get_json", fake_tiktok_oembed)
+    service = ReachService(build_registry(), config={})
+    result = await service.read("https://www.tiktok.com/@creator/video/12345")
+
+    assert result["platform"] == "tiktok"
+    assert result["id"] == "12345"
+    assert result["title"] == "Public TikTok video"
+    assert result["access"] == {"mode": "anonymous", "complete": False}
+    assert "iframe" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_service_reads_public_x_post_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_x_oembed(url: str, **kwargs: object) -> dict[str, object]:
+        assert url == x.OEMBED_URL
+        assert kwargs == {
+            "allowed_hosts": x.OEMBED_HOSTS,
+            "params": {
+                "url": "https://x.com/i/web/status/1234567890",
+                "omit_script": "true",
+                "hide_thread": "true",
+            },
+            "retries": 0,
+        }
+        return {
+            "type": "rich",
+            "url": "https://x.com/Interior/status/1234567890",
+            "author_name": "Interior",
+            "author_url": "https://x.com/Interior",
+            "html": "<blockquote><p>Public X post</p></blockquote><script>ignored()</script>",
+        }
+
+    monkeypatch.delenv("X_API_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("X_API_ALLOW_PAID_READS", raising=False)
+    monkeypatch.setattr(x, "get_json", fake_x_oembed)
+    service = ReachService(build_registry(), config={})
+    result = await service.read("https://x.com/Interior/status/1234567890")
+
+    assert result["platform"] == "x"
+    assert result["id"] == "1234567890"
+    assert result["text"] == "Public X post"
+    assert result["access"] == {"mode": "anonymous", "complete": False}
+    assert "script" not in repr(result)
 
 
 def test_discord_adapter_requires_explicit_channel_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,6 +329,31 @@ async def test_mcp_hackernews_feed_tool_round_trip(monkeypatch: pytest.MonkeyPat
     assert result.is_error is False
     assert result.structured_content["operation"] == "feed"
     assert result.structured_content["items"][0]["title"] == "Newest story"
+
+
+@pytest.mark.asyncio
+async def test_mcp_tiktok_public_read_tool_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp import Client
+
+    async def tiktok_oembed(url: str, **kwargs: object) -> object:
+        return {
+            "type": "video",
+            "provider_name": "TikTok",
+            "embed_product_id": "12345",
+            "title": "Public TikTok video",
+            "author_name": "Creator",
+            "html": "<iframe>must not be returned</iframe>",
+        }
+
+    monkeypatch.setattr(tiktok, "get_json", tiktok_oembed)
+    server = create_mcp_server(ReachService(build_registry(), config={}))
+    async with Client(server, mode="legacy") as client:
+        result = await client.call_tool("read", {"url": "https://www.tiktok.com/@creator/video/12345"})
+
+    assert result.is_error is False
+    assert result.structured_content["platform"] == "tiktok"
+    assert result.structured_content["access"] == {"mode": "anonymous", "complete": False}
+    assert "iframe" not in repr(result.structured_content)
 
 
 @pytest.mark.asyncio

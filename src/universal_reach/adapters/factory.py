@@ -10,6 +10,7 @@ from universal_reach.adapters.github import GitHubAdapter
 from universal_reach.adapters.hackernews import HackerNewsAdapter
 from universal_reach.adapters.meta_facebook import FacebookPageAdapter
 from universal_reach.adapters.meta_instagram import InstagramProfessionalAdapter
+from universal_reach.adapters.pinterest import PinterestAdapter
 from universal_reach.adapters.public_forums import DiscourseAdapter, FourChanAdapter, LemmyAdapter
 from universal_reach.adapters.reddit import RedditAdapter
 from universal_reach.adapters.telegram import TelegramAdapter
@@ -45,6 +46,7 @@ def build_registry() -> AdapterRegistry:
         InstagramProfessionalAdapter(),
         ThreadsAdapter(),
         TikTokAdapter(),
+        PinterestAdapter(),
     ]
     allowed_channels = [
         channel_id.strip()

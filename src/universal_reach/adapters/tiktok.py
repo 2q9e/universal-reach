@@ -1,10 +1,11 @@
-"""Owner-bound, read-only TikTok Display API adapter.
+"""Read public TikTok video metadata and owner-bound Display API data.
 
-Calls the official `/v2/user/info/` and `/v2/video/list/` routes only. Each
-operation requires a token from the local `TIKTOK_ACCESS_TOKEN` environment
-variable and an expected `open_id`; the adapter verifies that the token resolves
-to that exact account. Tokens are never accepted in MCP/CLI tool arguments or
-returned in results.
+Exact public video reads use TikTok's documented oEmbed endpoint and require no
+credentials. TikTok says the legacy Embed Videos/oEmbed integration will be
+deprecated soon, so this remains a limited metadata route. Profile and recent
+video-list operations use the official Display API, require a token from the
+local `TIKTOK_ACCESS_TOKEN` environment variable, and are bound to the token's
+verified `open_id`. Tokens are never accepted in MCP/CLI arguments or returned.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ from universal_reach.security import validate_https_url
 API_HOST = "open.tiktokapis.com"
 API_ROOT = f"https://{API_HOST}/v2"
 API_HOSTS = frozenset({API_HOST})
+OEMBED_URL = "https://www.tiktok.com/oembed"
+OEMBED_HOSTS = frozenset({"www.tiktok.com"})
 USER_INFO_URL = f"{API_ROOT}/user/info/"
 VIDEO_LIST_URL = f"{API_ROOT}/video/list/"
 _USER_FIELDS = "open_id,display_name,avatar_url"
@@ -55,7 +58,62 @@ class TikTokAdapter(Adapter):
     url_hosts = frozenset({"www.tiktok.com", "tiktok.com"})
 
     def __init__(self) -> None:
-        super().__init__(adapter_capability("tiktok", ("profile", "profile_posts")))
+        super().__init__(adapter_capability("tiktok", ("read", "profile", "profile_posts")))
+
+    async def read(self, url: str, options: dict[str, Any] | None = None) -> Record:
+        """Read limited metadata for one public video using TikTok oEmbed."""
+        del options
+        video_id, canonical_url = _parse_public_video_url(url)
+        response = await get_json(
+            OEMBED_URL,
+            allowed_hosts=OEMBED_HOSTS,
+            params={"url": canonical_url},
+        )
+        if not isinstance(response, Mapping) or response.get("type") != "video":
+            raise _parser_error("oEmbed video")
+
+        provider_name = response.get("provider_name")
+        if provider_name is not None and (not isinstance(provider_name, str) or provider_name.casefold() != "tiktok"):
+            raise _parser_error("oEmbed provider")
+        embedded_id = response.get("embed_product_id")
+        if embedded_id is not None and embedded_id != video_id:
+            raise _parser_error("oEmbed video ID")
+
+        title = _bounded_text(response.get("title"), 20_000)
+        author = _bounded_text(response.get("author_name"), 512)
+        thumbnail_url = _https_url(
+            response.get("thumbnail_url"),
+            allowed_suffixes=("tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com"),
+        )
+        media: list[MediaItem] = []
+        if thumbnail_url:
+            dimensions = {
+                key: dimension
+                for field, key in (("thumbnail_width", "width"), ("thumbnail_height", "height"))
+                if (dimension := _dimension(response.get(field))) is not None
+            }
+            media.append(
+                MediaItem(
+                    kind="thumbnail",
+                    url=thumbnail_url,
+                    title="TikTok video thumbnail",
+                    metadata=dimensions,
+                )
+            )
+
+        # TikTok's oEmbed response includes HTML. Treat it as untrusted and do
+        # not return or render it from this data-only adapter.
+        return Record(
+            platform=self.platform,
+            type="video",
+            id=video_id,
+            url=canonical_url,
+            author=author,
+            title=title,
+            media=media,
+            access=AccessInfo(mode="anonymous", complete=False),
+            extensions={"metadata_source": "tiktok_oembed", "oembed_type": "video"},
+        )
 
     async def profile(self, username: str, options: dict[str, Any] | None = None) -> Record:
         expected_open_id = _validate_open_id(username)
@@ -174,6 +232,42 @@ def _validate_open_id(value: str) -> str:
     if not isinstance(value, str) or not _OPEN_ID_RE.fullmatch(value.strip()):
         raise ReachError("invalid_request", "username must be the TikTok open_id returned for this app and account.")
     return value.strip()
+
+
+def _parse_public_video_url(value: str) -> tuple[str, str]:
+    if not isinstance(value, str) or not value:
+        raise ReachError("invalid_url", "A public TikTok video URL is required.")
+    validate_https_url(value, TikTokAdapter.url_hosts)
+    parsed = urlsplit(value)
+    parts = parsed.path.rstrip("/").split("/")
+    if (
+        len(parts) != 4
+        or parts[0] != ""
+        or not re.fullmatch(r"@[A-Za-z0-9._-]{1,64}", parts[1])
+        or parts[2] != "video"
+        or not _VIDEO_ID_RE.fullmatch(parts[3])
+    ):
+        raise ReachError("invalid_url", "Expected a TikTok video URL in the form /@username/video/<numeric-id>.")
+    video_id = parts[3]
+    return video_id, f"https://www.tiktok.com/@{parts[1][1:]}/video/{video_id}"
+
+
+def _bounded_text(value: Any, maximum: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized[:maximum] if normalized else None
+
+
+def _dimension(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 0 < value <= 100_000 else None
+    if isinstance(value, str) and value.isascii() and value.isdecimal() and len(value) <= 6:
+        dimension = int(value)
+        return dimension if 0 < dimension <= 100_000 else None
+    return None
 
 
 def _validate_limit(limit: int) -> int:

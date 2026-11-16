@@ -16,10 +16,10 @@ The CLI and stdio MCP server share one `ReachService` and a capability registry.
 
 - One Python package, CLI, and stdio MCP server.
 - Structured, normalized records with explicit pagination, access mode, and partial-result metadata.
-- Read-only anonymous adapters, plus opt-in Reddit OAuth, V2EX Personal Access Token, X app-only reads, owner-authorized Facebook/Instagram/Threads/TikTok reads, and an allowlisted Discord bot.
+- Read-only anonymous adapters, including limited exact-post metadata for X and exact-video metadata for TikTok through public oEmbed endpoints, plus opt-in Reddit OAuth, V2EX Personal Access Token, X app-only search/detailed reads, owner-authorized Facebook/Instagram/Threads and TikTok Display API reads, and an allowlisted Discord bot.
 - Host allowlists, HTTPS-only requests, redirect checks, bounded timeouts and retries, input validation, and safe error messages.
 - Configurable public Lemmy and Discourse instances, with DNS checks that reject private or non-global addresses.
-- No browser cookies or account passwords are used. Platform tokens are read from environment variables and never stored in the local JSON configuration. Reddit and X require explicit approval or paid-read opt-in; Meta adapters are restricted to authorized owner accounts.
+- No browser cookies or account passwords are used. Platform tokens are read from environment variables and never stored in the local JSON configuration. Reddit requires explicit approval; X paid API reads require opt-in; Meta adapters are restricted to authorized owner accounts.
 
 ## Installation
 
@@ -63,6 +63,9 @@ universal-reach search --platform hackernews --query "mcp server" --options '{"s
 universal-reach search-multi --query "public transit" --platform bluesky --platform github
 universal-reach read --url https://github.com/modelcontextprotocol/python-sdk
 universal-reach read --url 'https://youtu.be/M7lc1UVf-VE'
+universal-reach read --url 'https://www.tiktok.com/@creator/video/1234567890123456789'
+universal-reach read --url 'https://x.com/Interior/status/507185938620219395'
+universal-reach read --url 'https://x.com/Interior/status/507185938620219395' --options '{"auth_mode":"api"}'
 universal-reach replies --url https://news.ycombinator.com/item?id=1 --platform hackernews
 universal-reach profile --platform github --username octocat
 universal-reach health-check --platform bluesky
@@ -140,47 +143,47 @@ The MCP server exposes `platforms_list`, `platform_status`, `feed`, `search`, `s
 
 ## Platform capability matrix
 
-The table describes operations present in this source release. A check means an adapter operation exists; upstream visibility, instance settings, rate limits, and content availability still apply. “Planned” means no adapter is implemented here. “Restricted” means an access requirement or policy prevents an anonymous adapter in this release.
+The table describes operations present in this source release. A check means an adapter operation exists; upstream visibility, instance settings, rate limits, and content availability still apply. “Planned” means no adapter is implemented here. “Restricted” means anonymous retrieval is unavailable or a policy/approval limit blocks a compliant public route; restricted platforms can still have explicitly authenticated operations when those are documented.
 
-| Platform | Status | Search | Read | Replies | Profile | Profile posts | Anonymous access |
-|---|---|---:|---:|---:|---:|---:|---|
-| Reddit | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | No anonymous access; OAuth adapter sends no request without explicit Reddit approval and app configuration |
-| Quora | Restricted | — | — | — | — | — | No verified anonymous API; partner data feed requires pricing and use-case approval |
-| Stack Overflow | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; Stack Exchange API quota and paging rules apply |
-| Stack Exchange | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; select `options.site` |
-| GitHub | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; unauthenticated rate limits apply |
-| Steam Community | Partial | ✓ | — | — | — | — | Partial; searches current per-game announcement RSS entries only; discussions are unsupported |
-| 4chan | Partial | Limited† | ✓ | ✓ | — | — | Yes; public JSON API |
-| Hacker News | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; Algolia search and Firebase feeds, item reads, comments, and profiles |
-| XDA Forums | Restricted | — | — | — | — | — | Valnet Terms cover forums/RSS and prohibit automated crawling or content extraction |
-| V2EX | Partial | — | ✓ | ✓ | ✓ | — | Public profile route is anonymous; topic and replies routes require V2EX_ACCESS_TOKEN |
-| Zhihu | Restricted | — | — | — | — | — | Official search requires Access Secret and timestamp; response contract/quota not verified |
-| Baidu Tieba | Restricted | — | — | — | — | — | Official API is partner/application-based; no complete anonymous retrieval contract |
-| ResetEra | Restricted | — | — | — | — | — | Terms restrict automated retrieval; announced RSS is limited to a specific staff feed |
-| Lemmy | Partial | ✓ | ✓ | ✓ | — | — | Yes, on public configured instances |
-| Discourse forums | Partial | ✓ | ✓ | ✓ | — | — | Yes, on public configured instances |
-| DEV Community | Partial | ✓ | ✓ | — | ✓ | ✓ | Yes for implemented public Forem routes |
-| Indie Hackers | Restricted | — | — | — | — | — | Terms prohibit automated crawling/scraping; no official feed found |
-| Bogleheads | Partial | — | ✓ | — | — | — | Anonymous exact-post reads only when the post is in the bounded topic Atom feed |
-| Facebook | Restricted | — | — | — | — | ✓ | Configured Page token, `pages_read_engagement`, `pages_read_user_content`, and Page `MODERATE` task; approximately 600 ranked published posts/year |
-| Instagram | Restricted | — | — | — | ✓ | ✓ | Configured professional account only; Graph API scopes and app access apply; at most 10,000 recent media items |
-| YouTube | Partial | — | ✓ | — | — | ✓ | Anonymous oEmbed metadata and recent channel Atom feed; broader Data API access requires a Google API key |
-| WhatsApp | Restricted | — | — | — | — | — | Channel updates are public to visitors, but no automated public API/feed was verified; Business API requires a bearer token |
-| TikTok | Partial | — | — | — | ✓ | ✓ | OAuth token for the owner account; Display API scopes and app approval required |
-| WeChat | Restricted | — | — | — | — | — | Official account API requires onboarding, IP allowlisting, app credentials, and access tokens |
-| Telegram | Partial | — | ✓ | — | ✓ | ✓ | Anonymous public channel previews; hidden posts and groups are unsupported |
-| Snapchat | Restricted | — | — | — | — | — | Public Profile API requires an allowlisted app and bearer token; Developer Terms prohibit search-engine/directory use |
-| Douyin | Restricted | — | — | — | — | — | Search is experimental/approval-gated, requires app credentials, and has restrictive result-use terms |
-| Kuaishou | Restricted | — | — | — | — | — | Documented video routes require OAuth and are account-scoped; no anonymous public search verified |
-| Weibo | Restricted | — | — | — | — | — | Official CLI requires developer verification, OAuth, and trial/paid access; automated collection needs prior permission |
-| Pinterest | Restricted | — | — | — | — | — | App review and OAuth required; reads are account-scoped and public search is not documented |
-| X / Twitter | Partial | ✓ | ✓ | — | — | — | App-only Bearer token and explicit paid-read opt-in; recent search covers seven days |
-| Threads | Restricted | — | ✓ | ✓ | ✓ | ✓ | OAuth token owner's profile/posts; replies require `threads_read_replies`; exact reads require numeric API ID |
-| LinkedIn | Restricted | — | — | — | — | — | OAuth and vetted product access required; general public post search is unavailable |
-| Discord | Restricted* | — | ✓ | ✓ | — | — | Bot token, channel allowlist, and permissions required; content may be suppressed without privileged intent |
-| Bluesky | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes through public AppView GET endpoints |
+| Platform | Status | Search | Read | Replies | Profile | Profile posts | No-login route | Access notes |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| Reddit | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | X | OAuth adapter sends no request without explicit Reddit approval and app configuration |
+| Quora | Restricted | - | - | - | - | - | X | No verified anonymous API; partner data feed requires pricing and use-case approval |
+| Stack Overflow | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Stack Exchange API quota and paging rules apply |
+| Stack Exchange | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Select `options.site` |
+| GitHub | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Unauthenticated rate limits apply |
+| Steam Community | Partial | ✓ | - | - | - | - | Partial | Searches current per-game announcement RSS entries only; discussions are unsupported |
+| 4chan | Partial | Limited† | ✓ | ✓ | - | - | ✓ | Public JSON API |
+| Hacker News | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Algolia search and Firebase feeds, item reads, comments, and profiles |
+| XDA Forums | Restricted | - | - | - | - | - | X | Valnet Terms cover forums/RSS and prohibit automated crawling or content extraction |
+| V2EX | Partial | - | ✓ | ✓ | ✓ | - | Partial | Public profile route is anonymous; topic and replies routes require V2EX_ACCESS_TOKEN |
+| Zhihu | Restricted | - | - | - | - | - | X | Official search requires Access Secret and timestamp; response contract/quota not verified |
+| Baidu Tieba | Restricted | - | - | - | - | - | X | Official API is partner/application-based; no complete anonymous retrieval contract |
+| ResetEra | Restricted | - | - | - | - | - | X | Terms restrict automated retrieval; announced RSS is limited to a specific staff feed |
+| Lemmy | Partial | ✓ | ✓ | ✓ | - | - | Partial | Public routes work on configured instances that allow anonymous access |
+| Discourse forums | Partial | ✓ | ✓ | ✓ | - | - | Partial | Public routes work on configured instances that allow anonymous access |
+| DEV Community | Partial | ✓ | ✓ | - | ✓ | ✓ | Partial | Some public Forem routes are anonymous; other endpoints can require an API key |
+| Indie Hackers | Restricted | - | - | - | - | - | X | Terms prohibit automated crawling/scraping; no official feed found |
+| Bogleheads | Partial | - | ✓ | - | - | - | Partial | Anonymous exact-post reads only when the post is in the bounded topic Atom feed |
+| Facebook | Restricted | - | - | - | - | ✓ | X | Configured Page token, `pages_read_engagement`, `pages_read_user_content`, and Page `MODERATE` task; approximately 600 ranked published posts/year |
+| Instagram | Restricted | - | - | - | ✓ | ✓ | X | Configured professional account only; Graph API scopes and app access apply; at most 10,000 recent media items |
+| YouTube | Partial | - | ✓ | - | - | ✓ | Partial | Anonymous oEmbed metadata and recent channel Atom feed; broader Data API access requires a Google API key |
+| WhatsApp | Restricted | - | - | - | - | - | X | Channel updates are public to visitors, but no automated public API/feed was verified; Business API requires a bearer token |
+| TikTok | Partial | - | ✓ | - | ✓ | ✓ | Partial | Exact public video metadata uses oEmbed; profile and recent posts require owner OAuth |
+| WeChat | Restricted | - | - | - | - | - | X | Official account API requires onboarding, IP allowlisting, app credentials, and access tokens |
+| Telegram | Partial | - | ✓ | - | ✓ | ✓ | Partial | Anonymous public channel previews; hidden posts and groups are unsupported |
+| Snapchat | Restricted | - | - | - | - | - | X | Public Profile API requires an allowlisted app and bearer token; Developer Terms prohibit search-engine/directory use |
+| Douyin | Restricted | - | - | - | - | - | X | Search is experimental/approval-gated, requires app credentials, and has restrictive result-use terms |
+| Kuaishou | Restricted | - | - | - | - | - | X | Documented video routes require OAuth and are account-scoped; no anonymous public search verified |
+| Weibo | Restricted | - | - | - | - | - | X | Official CLI requires developer verification, OAuth, and trial/paid access; automated collection needs prior permission |
+| Pinterest | Partial | - | ✓ | - | ✓ | ✓ | X | App-approved token only. Profile and Pins are limited to the token account; cross-service use is limited by Pinterest's Developer Guidelines |
+| X / Twitter | Partial | ✓ | ✓ | - | - | - | Partial | Exact public posts use limited anonymous oEmbed metadata; search and detailed exact reads require app-only Bearer token plus explicit paid-read opt-in |
+| Threads | Restricted | - | ✓ | ✓ | ✓ | ✓ | X | OAuth token owner's profile/posts; replies require `threads_read_replies`; exact reads require numeric API ID |
+| LinkedIn | Restricted | - | - | - | - | - | X | OAuth and vetted product access required; general public post search is unavailable |
+| Discord | Restricted* | - | ✓ | ✓ | - | - | X | Bot token, channel allowlist, and permissions required; content may be suppressed without privileged intent |
+| Bluesky | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Public AppView GET endpoints |
 
-`—` means not implemented, rather than a claim that the platform itself lacks the capability. `*` Discord’s adapter is registered only when `DISCORD_ALLOWED_CHANNEL_IDS` contains one or more channel snowflakes. `†` 4chan search is limited to matching preview text in the active catalog of one explicitly selected board; it is not global full-text search. Hacker News search uses the separate public Algolia HN Search index; exact reads, replies, and profiles use the official Firebase API. Search completeness and availability depend on the index and its published limits. Lemmy and Discourse need an instance URL and only return content visible to anonymous visitors. Facebook, Instagram, Threads, and TikTok use owner-authorized APIs and do not provide anonymous access in this release.
+`✓` means a no-login route is implemented. `Partial` means no-login access works only for the operations or sources listed in the access notes. `X` means we reviewed the available options but found no compliant no-login route for the listed functionality. `-` in an operation column means that operation is not implemented; it does not mean the platform itself lacks that feature. `*` Discord’s adapter is registered only when `DISCORD_ALLOWED_CHANNEL_IDS` contains one or more channel snowflakes. `†` 4chan search is limited to matching preview text in the active catalog of one explicitly selected board; it is not global full-text search. Hacker News search uses the separate public Algolia HN Search index; exact reads, replies, and profiles use the official Firebase API. Search completeness and availability depend on the index and its published limits. Lemmy and Discourse need an instance URL and only return content visible to anonymous visitors. Facebook, Instagram, and Threads use owner-authorized APIs. TikTok exact video reads return limited public oEmbed metadata; profile and recent-post reads still use the owner-authorized Display API. X exact post reads default to limited anonymous oEmbed metadata; search and detailed exact reads require an explicit opt-in to the paid API.
 
 The generic `feed` operation is currently implemented for Hacker News only, with `top`, `new`, `best`, `ask`, `show`, and `job` categories.
 
@@ -190,22 +193,33 @@ No adapter in this release implements media extraction, transcripts, or archives
 
 ## Security and privacy
 
-- Requests use read-only HTTP methods to documented APIs, official feeds, or public previews. TikTok's `video.list` API uses POST for a read operation; no adapter uses POST to publish or modify content. Adapters do not bypass authentication or access controls; owner-authorized Meta and TikTok reads remain limited to configured account identities.
+- Requests use read-only HTTP methods to documented APIs, official feeds, or public previews. TikTok's `video.list` API uses POST for a read operation; no adapter uses POST to publish or modify content. TikTok and X oEmbed responses contain embed HTML, which adapters treat as untrusted, parse only for inert text where needed, and never return or render. Adapters do not bypass authentication or access controls; protected X posts remain unavailable, and owner-authorized Meta and TikTok Display API reads remain limited to configured account identities.
 - Static API hosts are allowlisted; URL inputs require HTTPS and reject credentials and nonstandard ports. Redirects are revalidated.
 - Lemmy and Discourse origins must be public HTTPS hosts. Resolution rejects localhost, private, link-local, and other non-global addresses, then pins the connection to an address that passed validation. These two adapters connect directly and ignore proxy environment settings so a proxy cannot resolve the hostname to a different address.
 - The local MCP server listens on stdio; this package does not open an inbound network server.
 - No browser cookies or account passwords are imported. The local JSON config has no credential fields; optional PAT/OAuth values are environment-only.
 - Logs avoid request query strings and response bodies. Upstream public content can still contain personal data; callers should apply their own retention and display policies.
+- Pinterest uses only the documented API v5 with `PINTEREST_ACCESS_TOKEN`; no anonymous or undocumented web endpoint is called. `profile` and `profile_posts` accept only `username="me"`, and `read` only requests a Pin available to the configured account. Pinterest's Terms prohibit unauthorized automated collection, so no scraping fallback is included. Its Developer Guidelines restrict combining API account data with other services; cross-service use must fit the guidelines' specified-service exception. The adapter does not implement search.
 
 Optional credentials are environment-only:
 
 - V2EX topic reads/replies use `V2EX_ACCESS_TOKEN`.
 - Reddit requires prior approval; only then set `REDDIT_API_APPROVED=true` and provide `REDDIT_ACCESS_TOKEN`, `REDDIT_CLIENT_ID`, and `REDDIT_USERNAME`. Requests remain disabled when a required setting is absent.
-- X requires `X_API_BEARER_TOKEN` and the explicit `X_API_ALLOW_PAID_READS=true` opt-in. Recent search and exact reads use prepaid credits, so review current pricing first.
+- X exact public-post metadata uses its public oEmbed endpoint without an account token, API key, or cookie. Search and detailed exact reads require `X_API_BEARER_TOKEN` and the explicit `X_API_ALLOW_PAID_READS=true` opt-in; choose `options.auth_mode="api"` to use the paid API for an exact read. Review current pricing first.
 - Facebook requires `META_FACEBOOK_PAGE_ID` and `META_FACEBOOK_PAGE_ACCESS_TOKEN`, plus the Page permissions described in its capability entry. `META_FACEBOOK_PAGE_USERNAME` is optional and only matches that same Page.
 - Instagram requires `META_INSTAGRAM_USER_ID` and `META_INSTAGRAM_ACCESS_TOKEN` for a professional account. `META_INSTAGRAM_USERNAME` is an optional account-name match.
 - Threads requires `META_THREADS_ACCESS_TOKEN`; profile and post reads use the token owner, and replies also require `threads_read_replies`. Optional `META_THREADS_USER_ID` and `META_THREADS_USERNAME` bind calls to the expected owner. Exact reads and replies need `options.thread_id`, the numeric API ID returned by the Threads API; a public shortcode URL alone is insufficient.
-- TikTok's Display API requires `TIKTOK_ACCESS_TOKEN` with the `user.info.basic` and `video.list` scopes. Supply the app-specific `open_id` returned by TikTok as the `username` argument; tokens are rejected from tool options to keep them out of MCP/CLI arguments. Search, public profile discovery, and anonymous reads are not implemented.
+- TikTok exact public video reads use the documented oEmbed endpoint without an account, API key, or cookie and return only limited metadata. TikTok's current Embed Videos documentation says oEmbed will be deprecated soon and recommends Embed Player for new integrations, so availability may change. Display API `profile` and `profile_posts` still require `TIKTOK_ACCESS_TOKEN` with `user.info.basic` and `video.list` scopes. Supply the app-specific `open_id` returned by TikTok as the `username` argument; tokens are rejected from tool options to keep them out of MCP/CLI arguments. Search, public profile discovery, replies, and full video retrieval are not implemented.
+- Pinterest requires a current app-approved OAuth access token in `PINTEREST_ACCESS_TOKEN`. Use `boards:read` and `pins:read` for Pin reads/lists; `user_accounts:read` is needed for profiles and the live health check. Calls only access `username="me"`; search and anonymous retrieval are unsupported. Pinterest's Developer Guidelines require credentials to stay local in bring-your-own-key apps and restrict combining account data with other services; cross-service use must fit the guidelines' specified-service exception.
+
+Example, after obtaining an approved token with the required read scopes:
+
+```sh
+# Set PINTEREST_ACCESS_TOKEN in your local environment first.
+universal-reach profile --platform pinterest --username me
+universal-reach profile-posts --platform pinterest --username me --limit 20
+universal-reach read --url 'https://www.pinterest.com/pin/123456789/'
+```
 - Discord requires `DISCORD_BOT_TOKEN` and a comma-separated `DISCORD_ALLOWED_CHANNEL_IDS` allowlist; only those channels are addressable.
 
 OS credential-store integration is not included.
@@ -232,7 +246,7 @@ Tests use deterministic mocked responses and should not require platform account
 
 ## Known limitations
 
-- Twenty of the 35 catalog entries have adapters registered by default; Discord can be registered separately with its explicit channel allowlist. These are partial implementations, not full coverage of every platform feature. Reddit remains dormant until its approval and OAuth settings are present. Meta and TikTok reads require authorized account tokens; Steam search covers only documented per-game announcement feeds, while discussion threads remain unsupported.
+- Twenty of the 35 catalog entries have adapters registered by default; Discord can be registered separately with its explicit channel allowlist. These are partial implementations, not full coverage of every platform feature. Reddit remains dormant until its approval and OAuth settings are present. Meta reads and TikTok profile/recent-post reads require authorized account tokens; TikTok's tokenless oEmbed route is limited to metadata for one supplied public video URL. Steam search covers only documented per-game announcement feeds, while discussion threads remain unsupported.
 - Public endpoints may change, return partial data, enforce rate limits, or deny particular content. Errors preserve those limits instead of retrying indefinitely.
 - Anonymous GitHub and Stack Exchange quotas are limited. Stack Exchange page depth is bounded; GitHub search exposes a bounded result window.
 - 4chan calls are rate-limited in-process and search is board-catalog-only. Discourse and Lemmy depend on the selected instance.
@@ -259,13 +273,14 @@ Adapter routes and access declarations are based on the platforms' published doc
 - [Steamworks Events and Announcements RSS guidance](https://partner.steamgames.com/doc/marketing/event_tools), [Steam Web API](https://steamcommunity.com/dev), [ISteamNews interface](https://partner.steamgames.com/doc/webapi/ISteamNews), and [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/)
 - [Zhihu API Platform](https://developer.zhihu.com/) and [Zhihu Agreement](https://www.zhihu.com/plainterms)
 - [Quora public-data information](https://help.quora.com/hc/en-us/articles/15205064557844-Can-I-opt-out-of-having-my-Quora-content-used-to-train-LLMs) and [partner data program](https://aws.amazon.com/marketplace/pp/prodview-qkz4nbakwh7cs)
-- [Pinterest API access tiers](https://developers.pinterest.com/docs/key-concepts/access-tiers/) and [developer guidelines](https://policy.pinterest.com/en-gb/developer-guidelines/)
+- [Pinterest Terms of Service](https://policy.pinterest.com/en/terms-of-service), [developer guidelines](https://policy.pinterest.com/en/developer-guidelines), [authentication and authorization](https://developers.pinterest.com/docs/getting-started/set-up-authentication-and-authorization/), [Pin list](https://developers.pinterest.com/docs/api/v5/pins-list/), [Get Pin](https://developers.pinterest.com/docs/api/v5/pins-get/), [user account](https://developers.pinterest.com/docs/api/v5/user_account-get/), and [pagination](https://developers.pinterest.com/docs/reference/pagination/)
 - [X recent Post search](https://docs.x.com/x-api/posts/search-recent-posts), [Get Post by ID](https://docs.x.com/x-api/posts/get-post-by-id), and [pricing](https://docs.x.com/x-api/getting-started/pricing)
 - [Discord API reference](https://docs.discord.com/developers/reference), [message routes](https://docs.discord.com/developers/resources/message), and [permissions](https://docs.discord.com/developers/topics/permissions)
 - [Meta Page Published Posts](https://developers.facebook.com/docs/graph-api/reference/page/published_posts/), [Page permissions](https://developers.facebook.com/docs/graph-api/reference/page/), and [Graph API versioning](https://developers.facebook.com/docs/graph-api/guides/versioning)
 - [Instagram Platform overview](https://developers.facebook.com/documentation/instagram-platform/overview) and [IG User Media](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media)
 - [Meta Threads API collection](https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api), which describes the token-owner and reply endpoints used by the adapter
 - [TikTok Display API overview](https://developers.tiktok.com/docs/en/display-api-overview), [Get user info](https://developers.tiktok.com/docs/en/tiktok-api-v2-get-user-info), [List videos](https://developers.tiktok.com/docs/en/tiktok-api-v2-video-list), and [error handling](https://developers.tiktok.com/docs/en/tiktok-api-v2-error-handling)
+- [TikTok Embed Videos (oEmbed)](https://developers.tiktok.com/docs/en/embed-videos) and [Embed Player](https://developers.tiktok.com/docs/en/embed-player). TikTok says the former will be deprecated soon; Universal Reach uses its documented metadata response only and does not return the embed HTML.
 - [Baidu Tieba Open API](https://tieba.baidu.com/tb/zt/tiebaapi/index.html) and [client agreement](https://tieba.baidu.com/tb/eula.html)
 - [Valnet's XDA ownership page](https://www.valnetinc.com/en/xda) and [Terms of Use](https://www.valnetinc.com/en/terms-of-use), which cover associated forums and RSS feeds
 - [WhatsApp Channel visibility](https://faq.whatsapp.com/699347952293912/?cms_platform=web&helpref=uf_share), [Business Platform](https://developers.facebook.com/documentation/business-messaging/whatsapp/overview), and [Terms](https://www.whatsapp.com/legal/terms-of-service?mainArticle=true)

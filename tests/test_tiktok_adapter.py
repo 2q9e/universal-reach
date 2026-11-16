@@ -39,6 +39,80 @@ def _success(payload: object) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
+async def test_public_read_uses_anonymous_oembed_and_normalizes_safe_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_get_json(url: str, **kwargs: object) -> object:
+        calls.append((url, kwargs))
+        return {
+            "type": "video",
+            "provider_name": "TikTok",
+            "embed_product_id": "7080213458555737986",
+            "title": "A public video",
+            "author_name": "Creator",
+            "thumbnail_url": "https://p16-sign.tiktokcdn-us.com/cover.jpg",
+            "thumbnail_width": "325",
+            "thumbnail_height": 578,
+            "html": '<iframe src="javascript:alert(1)"></iframe>',
+        }
+
+    monkeypatch.setattr(tiktok, "get_json", fake_get_json)
+
+    result = await TikTokAdapter().read("https://www.tiktok.com/@creator/video/7080213458555737986")
+
+    assert calls == [
+        (
+            tiktok.OEMBED_URL,
+            {
+                "allowed_hosts": tiktok.OEMBED_HOSTS,
+                "params": {"url": "https://www.tiktok.com/@creator/video/7080213458555737986"},
+            },
+        )
+    ]
+    assert result.platform == "tiktok"
+    assert result.type == "video"
+    assert result.id == "7080213458555737986"
+    assert result.author == "Creator"
+    assert result.title == "A public video"
+    assert result.media[0].url == "https://p16-sign.tiktokcdn-us.com/cover.jpg"
+    assert result.media[0].metadata == {"width": 325, "height": 578}
+    assert result.access.mode == "anonymous"
+    assert result.access.complete is False
+    assert "javascript:" not in repr(result.to_dict())
+    assert "iframe" not in repr(result.to_dict())
+
+
+@pytest.mark.asyncio
+async def test_public_read_rejects_unsafe_or_unsupported_urls_before_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def unexpected_get_json(url: str, **kwargs: object) -> object:
+        pytest.fail("invalid TikTok URLs must be rejected before making a request")
+
+    monkeypatch.setattr(tiktok, "get_json", unexpected_get_json)
+    adapter = TikTokAdapter()
+    for url in (
+        "http://www.tiktok.com/@creator/video/123",
+        "https://www.tiktok.com.evil.test/@creator/video/123",
+        "https://vm.tiktok.com/short-code",
+        "https://www.tiktok.com/@creator/live/123",
+        "https://www.tiktok.com/@creator/video/not-numeric",
+        "https://user:pass@www.tiktok.com/@creator/video/123",
+    ):
+        with pytest.raises(ReachError):
+            await adapter.read(url)
+
+
+@pytest.mark.asyncio
+async def test_public_read_rejects_wrong_oembed_identity_and_ignores_html(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_get_json(url: str, **kwargs: object) -> object:
+        return {"type": "video", "provider_name": "TikTok", "embed_product_id": "999"}
+
+    monkeypatch.setattr(tiktok, "get_json", fake_get_json)
+    with pytest.raises(ReachError) as error:
+        await TikTokAdapter().read("https://www.tiktok.com/@creator/video/123")
+    assert error.value.code == "parser_error"
+
+
+@pytest.mark.asyncio
 async def test_profile_verifies_token_owner_and_normalizes_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TIKTOK_ACCESS_TOKEN", ACCESS_TOKEN)
     calls: list[tuple[str, dict[str, object]]] = []
