@@ -7,7 +7,7 @@ import os
 import pytest
 
 from universal_reach.adapters.factory import build_registry
-from universal_reach.adapters import bluesky, bogleheads, discord, forem, github, hackernews, public_forums, reddit, stackexchange, telegram, tiktok, v2ex, x, youtube
+from universal_reach.adapters import bluesky, bogleheads, discord, forem, github, hackernews, public_forums, reddit, stackexchange, steam, telegram, tiktok, v2ex, x, youtube
 from universal_reach.config import load_config, save_config
 from universal_reach.errors import PlatformNotImplemented, ReachError
 from universal_reach.mcp_server import create_mcp_server
@@ -23,11 +23,11 @@ def test_platform_catalog_and_loaded_adapters_are_truthful(monkeypatch: pytest.M
     assert len(catalog) == 35
     assert len({item["id"] for item in catalog}) == 35
     implemented = [item for item in catalog if item["operations"]]
-    assert len(implemented) == 19
+    assert len(implemented) == 20
     assert {item["id"] for item in implemented} == {
         "github", "stackoverflow", "stackexchange", "hackernews", "v2ex",
         "bogleheads", "reddit", "telegram", "youtube", "x", "4chan", "lemmy",
-        "discourse", "devto", "bluesky", "facebook", "instagram", "threads", "tiktok",
+        "discourse", "devto", "bluesky", "facebook", "instagram", "threads", "tiktok", "steam",
     }
     assert all(item["status"] in {"partial", "restricted"} for item in implemented)
 
@@ -101,6 +101,10 @@ async def test_health_check_reaches_each_adapter_and_uses_configured_instances(m
     async def bluesky_json(url: str, **kwargs: object) -> object:
         return {"posts": []}
 
+    async def steam_text(url: str, **kwargs: object) -> str:
+        calls.append((url, kwargs))
+        return "<rss><channel/></rss>"
+
     async def fourchan_json(self, path: str, **kwargs: object) -> object:
         return {"boards": [{"board": "g"}]}
 
@@ -112,6 +116,7 @@ async def test_health_check_reaches_each_adapter_and_uses_configured_instances(m
     monkeypatch.setattr(public_forums.FourChanAdapter, "_api_json", fourchan_json)
     monkeypatch.setattr(forem, "get_json", forem_json)
     monkeypatch.setattr(bluesky, "get_json", bluesky_json)
+    monkeypatch.setattr(steam, "get_text", steam_text)
 
     async def available_status(self, options=None):
         from universal_reach.models import AdapterStatus
@@ -132,8 +137,8 @@ async def test_health_check_reaches_each_adapter_and_uses_configured_instances(m
     result = await service.health_check()
 
     assert result["healthy"] is False
-    assert len(result["results"]) == 19
-    assert sum(row["status"] == "available" for row in result["results"]) == 13
+    assert len(result["results"]) == 20
+    assert sum(row["status"] == "available" for row in result["results"]) == 14
     assert {row["platform"] for row in result["results"] if row["status"] == "degraded"} == {
         "reddit", "x", "facebook", "instagram", "threads", "tiktok",
     }
@@ -142,6 +147,7 @@ async def test_health_check_reaches_each_adapter_and_uses_configured_instances(m
             assert row["access_mode"] == "unknown"
     assert any(url == "https://lemmy.example/api/v4/search" and kwargs["public_instance"] is True for url, kwargs in calls)
     assert any(url == "https://discourse.example/latest.json" and kwargs["public_instance"] is True for url, kwargs in calls)
+    assert any(url == "https://steamcommunity.com/games/489830/rss" for url, kwargs in calls)
 
 
 @pytest.mark.asyncio

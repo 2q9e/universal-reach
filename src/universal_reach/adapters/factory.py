@@ -18,6 +18,7 @@ from universal_reach.adapters.threads import ThreadsAdapter
 from universal_reach.adapters.youtube import YouTubeAdapter
 from universal_reach.adapters.x import XAdapter
 from universal_reach.adapters.stackexchange import StackExchangeAdapter
+from universal_reach.adapters.steam import SteamAdapter
 from universal_reach.adapters.v2ex import V2EXAdapter
 from universal_reach.registry import AdapterRegistry
 
@@ -27,6 +28,7 @@ def build_registry() -> AdapterRegistry:
         GitHubAdapter(),
         StackExchangeAdapter(platform="stackoverflow"),
         StackExchangeAdapter(platform="stackexchange"),
+        SteamAdapter(),
         HackerNewsAdapter(),
         BogleheadsAdapter(),
         RedditAdapter(),

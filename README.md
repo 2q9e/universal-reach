@@ -1,8 +1,10 @@
 # Universal Reach
 
+[![Tests](https://github.com/2q9e/universal-reach/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/2q9e/universal-reach/actions/workflows/tests.yml)
+
 Universal Reach is a local, read-only CLI and Model Context Protocol (MCP) server for retrieving public content from supported social platforms and online communities. It makes direct requests to documented public APIs; there is no Universal Reach cloud service.
 
-The project catalogs all 35 requested platforms and implements adapters for 19 platform IDs; Discord can be activated separately with an explicit channel allowlist. Some adapters require approved, owner-authorized tokens. The catalog distinguishes working adapters from restricted and not-yet-implemented platforms. It does not claim that a listed platform is fully supported.
+The project catalogs all 35 requested platforms and implements adapters for 20 platform IDs; Discord can be activated separately with an explicit channel allowlist. Some adapters require approved, owner-authorized tokens. The catalog distinguishes working adapters from restricted and not-yet-implemented platforms. It does not claim that a listed platform is fully supported.
 
 Anonymous access means a request works without a user account, API key or token, or browser session cookie. A public API endpoint or feed is valid for this path when it is accessible without those credentials and its published terms permit the use. Separately marked, opt-in authenticated adapters add authorized functionality where a platform does not offer an anonymous route.
 
@@ -21,7 +23,7 @@ The CLI and stdio MCP server share one `ReachService` and a capability registry.
 
 ## Installation
 
-Requires CPython 3.10 or newer. The package is pure Python and supports Linux, macOS, and Windows where a compatible Python runtime is available. ARM64 has not been separately release-tested.
+Requires CPython 3.11 or newer. Python 3.10 reached end of life in October 2026 ([Python version status](https://devguide.python.org/versions/)). The package is pure Python and supports Linux, macOS, and Windows where a compatible Python runtime is available. ARM64 has not been separately release-tested.
 
 ### Linux and macOS
 
@@ -66,12 +68,13 @@ universal-reach doctor
 
 The service validates input and returns a structured error with a nonzero exit status when an operation is unsupported or upstream access fails. `status` only reports configured capability; `health-check` makes bounded live requests. `doctor` validates local configuration, checks whether the MCP SDK is installed, and performs live checks against implemented adapters.
 
-Some adapters need public instance or board options:
+Some adapters need platform-specific options:
 
 ```sh
 universal-reach search --platform 4chan --query "example" --options '{"board":"g"}'
 universal-reach search --platform lemmy --query "example" --options '{"instance_url":"https://lemmy.world"}'
 universal-reach search --platform discourse --query "example" --options '{"instance_url":"https://meta.discourse.org"}'
+universal-reach search --platform steam --query "patch" --options '{"app_id":"489830"}'
 ```
 
 Owner-authorized Meta reads use environment variables and accept only the configured account:
@@ -137,10 +140,10 @@ The table describes operations present in this source release. A check means an 
 | Stack Overflow | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; Stack Exchange API quota and paging rules apply |
 | Stack Exchange | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; select `options.site` |
 | GitHub | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; unauthenticated rate limits apply |
-| Steam Community | Restricted | — | — | — | — | — | No documented public discussions route; automated HTML reading is excluded |
+| Steam Community | Partial | ✓ | — | — | — | — | Partial; searches current per-game announcement RSS entries only; discussions are unsupported |
 | 4chan | Partial | Limited† | ✓ | ✓ | — | — | Yes; public JSON API |
 | Hacker News | Partial | — | ✓ | ✓ | ✓ | ✓ | Yes; official Firebase API |
-| XDA Forums | Planned | — | — | — | — | — | No first-party feed/API permission verified; third-party listing only |
+| XDA Forums | Restricted | — | — | — | — | — | Valnet Terms cover forums/RSS and prohibit automated crawling or content extraction |
 | V2EX | Partial | — | ✓ | ✓ | ✓ | — | Public profile route is anonymous; topic and replies routes require V2EX_ACCESS_TOKEN |
 | Zhihu | Restricted | — | — | — | — | — | Official search requires Access Secret and timestamp; response contract/quota not verified |
 | Baidu Tieba | Restricted | — | — | — | — | — | Official API is partner/application-based; no complete anonymous retrieval contract |
@@ -214,15 +217,15 @@ python -m pip install -e '.[test]'
 python -m pytest
 ```
 
-Tests use deterministic mocked responses and should not require platform accounts or make live requests. The current repository does not yet include a configured CI workflow; Linux, macOS, and Windows have not all been release-tested.
+Tests use deterministic mocked responses and should not require platform accounts or make live requests. GitHub Actions runs CPython 3.11–3.15 on Linux x64, plus Python 3.11 and 3.15 on Linux ARM64, macOS Intel and Apple silicon, and Windows x64 and ARM64.
 
 ## Known limitations
 
-- Nineteen of the 35 catalog entries have adapters registered by default; Discord can be registered separately with its explicit channel allowlist. These are partial implementations, not full coverage of every platform feature. Reddit remains dormant until its approval and OAuth settings are present. Meta and TikTok reads require authorized account tokens; Steam discussions remain restricted.
+- Twenty of the 35 catalog entries have adapters registered by default; Discord can be registered separately with its explicit channel allowlist. These are partial implementations, not full coverage of every platform feature. Reddit remains dormant until its approval and OAuth settings are present. Meta and TikTok reads require authorized account tokens; Steam search covers only documented per-game announcement feeds, while discussion threads remain unsupported.
 - Public endpoints may change, return partial data, enforce rate limits, or deny particular content. Errors preserve those limits instead of retrying indefinitely.
 - Anonymous GitHub and Stack Exchange quotas are limited. Stack Exchange page depth is bounded; GitHub search exposes a bounded result window.
 - 4chan calls are rate-limited in-process and search is board-catalog-only. Discourse and Lemmy depend on the selected instance.
-- No cross-platform ARM matrix has been run. Browser automation, authenticated sessions, media downloads, transcript extraction, and archive integrations are not included.
+- The hosted ARM jobs are configured but have not completed yet. Browser automation, authenticated browser sessions, media downloads, transcript extraction, and archive integrations are not included.
 
 ## API references
 
@@ -241,7 +244,7 @@ Adapter routes and access declarations are based on the platforms' published doc
 - [YouTube channel Atom feed](https://developers.google.com/youtube/data/guides/push_notifications)
 - [V2EX API 2.0](https://edge.v2ex.com/help/api) and [legacy profile API](https://www.v2ex.com/p/7v9tec53)
 - [Bogleheads Atom feed announcement](https://www.bogleheads.org/forum/viewtopic.php?p=3123123)
-- [Steam Web API](https://steamcommunity.com/dev) and [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/)
+- [Steamworks Events and Announcements RSS guidance](https://partner.steamgames.com/doc/marketing/event_tools), [Steam Web API](https://steamcommunity.com/dev), [ISteamNews interface](https://partner.steamgames.com/doc/webapi/ISteamNews), and [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/)
 - [Zhihu API Platform](https://developer.zhihu.com/) and [Zhihu Agreement](https://www.zhihu.com/plainterms)
 - [Quora public-data information](https://help.quora.com/hc/en-us/articles/15205064557844-Can-I-opt-out-of-having-my-Quora-content-used-to-train-LLMs) and [partner data program](https://aws.amazon.com/marketplace/pp/prodview-qkz4nbakwh7cs)
 - [Pinterest API access tiers](https://developers.pinterest.com/docs/key-concepts/access-tiers/) and [developer guidelines](https://policy.pinterest.com/en-gb/developer-guidelines/)
@@ -252,6 +255,7 @@ Adapter routes and access declarations are based on the platforms' published doc
 - [Meta Threads API collection](https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api), which describes the token-owner and reply endpoints used by the adapter
 - [TikTok Display API overview](https://developers.tiktok.com/docs/en/display-api-overview), [Get user info](https://developers.tiktok.com/docs/en/tiktok-api-v2-get-user-info), [List videos](https://developers.tiktok.com/docs/en/tiktok-api-v2-video-list), and [error handling](https://developers.tiktok.com/docs/en/tiktok-api-v2-error-handling)
 - [Baidu Tieba Open API](https://tieba.baidu.com/tb/zt/tiebaapi/index.html) and [client agreement](https://tieba.baidu.com/tb/eula.html)
+- [Valnet's XDA ownership page](https://www.valnetinc.com/en/xda) and [Terms of Use](https://www.valnetinc.com/en/terms-of-use), which cover associated forums and RSS feeds
 - [WhatsApp Channel visibility](https://faq.whatsapp.com/699347952293912/?cms_platform=web&helpref=uf_share), [Business Platform](https://developers.facebook.com/documentation/business-messaging/whatsapp/overview), and [Terms](https://www.whatsapp.com/legal/terms-of-service?mainArticle=true)
 - [Tencent Cloud WeChat Open Platform documentation](https://cloud.tencent.com/document/product/1301/100187)
 - [Weibo CLI quickstart](https://open.weibo.com/cli/quickstart) and [service agreement](https://www.weibo.com/signup/v5/protocol/)
@@ -266,4 +270,4 @@ Keep adapters read-only and use documented public endpoints. Add deterministic f
 
 ## License and upstream attribution
 
-This project is distributed under the MIT License. It was informed by research into public APIs and by review of the MIT-licensed [Agent-Reach](https://github.com/Panniantong/Agent-Reach) project; no Agent-Reach source code is copied into this repository.
+This project is distributed under the MIT License. It was informed by research into public APIs and review of the MIT-licensed [Agent-Reach](https://github.com/Panniantong/Agent-Reach) project. The [upstream design review](docs/upstream-review.md) records the fork-versus-new-implementation decision; no Agent-Reach source code is copied into this repository.
