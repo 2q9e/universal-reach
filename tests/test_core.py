@@ -32,6 +32,18 @@ def test_platform_catalog_and_loaded_adapters_are_truthful(monkeypatch: pytest.M
     assert all(item["status"] in {"partial", "restricted"} for item in implemented)
 
 
+def test_single_capability_lookup_returns_registered_adapter_capability() -> None:
+    registry = build_registry()
+
+    bluesky = registry.capability("Bluesky")
+    assert bluesky.status == "partial"
+    assert "search" in bluesky.operations
+
+    quora = registry.capability("quora")
+    assert quora.status == "restricted"
+    assert quora.operations == ()
+
+
 def test_discord_adapter_requires_explicit_channel_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DISCORD_ALLOWED_CHANNEL_IDS", "222222222222222222,333333333333333333")
     registry = build_registry()
@@ -40,7 +52,7 @@ def test_discord_adapter_requires_explicit_channel_allowlist(monkeypatch: pytest
     assert discord_capability["status"] == "partial"
     assert discord_capability["operations"] == ("read", "replies")
     assert "discord" in registry.implemented_platforms()
-    assert "search" not in registry.get("hackernews").capability.operations
+    assert "search" in registry.get("hackernews").capability.operations
 
 
 def test_unsupported_platform_operation_returns_explicit_error() -> None:
@@ -52,13 +64,18 @@ def test_unsupported_platform_operation_returns_explicit_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_multi_search_reports_unsupported_adapter_as_partial_failure() -> None:
+async def test_multi_search_includes_public_hackernews_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def hn_search_json(url: str, **kwargs: object) -> dict[str, object]:
+        return {"hits": [], "nbHits": 0, "nbPages": 0, "hitsPerPage": 10}
+
+    monkeypatch.setattr(hackernews, "get_json", hn_search_json)
     service = ReachService(build_registry(), config={})
     result = await service.search_multi(["hackernews"], "example")
 
-    assert result["partial"] is True
-    assert result["failed_platforms"] == ["hackernews"]
-    assert result["results"][0]["error"]["code"] == "unsupported_operation"
+    assert result["partial"] is False
+    assert result["failed_platforms"] == []
+    assert result["results"][0]["ok"] is True
+    assert result["results"][0]["result"]["operation"] == "search"
 
 
 @pytest.mark.asyncio
@@ -85,7 +102,7 @@ async def test_health_check_reaches_each_adapter_and_uses_configured_instances(m
         return {"items": [{"api_site_parameter": "stackoverflow"}]}
 
     async def hn_json(url: str, **kwargs: object) -> object:
-        return 100
+        return {"hits": [], "nbHits": 0, "nbPages": 0, "hitsPerPage": 1} if "hn.algolia.com" in url else 100
 
     async def public_json(url: str, **kwargs: object) -> object:
         calls.append((url, kwargs))
@@ -225,23 +242,28 @@ def test_config_rejects_credentials_and_writes_private_file(tmp_path) -> None:
     assert json.loads(path.read_text())["log_level"] == "INFO"
 
 
-def test_cli_json_and_error_exit_code(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_json_and_hackernews_search(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     from universal_reach.cli import main
+
+    async def hn_search_json(url: str, **kwargs: object) -> dict[str, object]:
+        return {"hits": [], "nbHits": 0, "nbPages": 0, "hitsPerPage": 10}
+
+    monkeypatch.setattr(hackernews, "get_json", hn_search_json)
 
     assert main(["platforms"]) == 0
     output = json.loads(capsys.readouterr().out)
     assert len(output["platforms"]) == 35
 
-    assert main(["search", "--platform", "hackernews", "--query", "example"]) == 2
-    failure = json.loads(capsys.readouterr().out)
-    assert failure["ok"] is False
-    assert failure["error"]["code"] == "unsupported_operation"
+    assert main(["search", "--platform", "hackernews", "--query", "example"]) == 0
+    search_result = json.loads(capsys.readouterr().out)
+    assert search_result["operation"] == "search"
+    assert search_result["extensions"]["source"] == "hn_search_algolia"
 
     assert main(["--format", "jsonl", "search-multi", "--query", "example", "--platform", "hackernews"]) == 0
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert len(rows) == 1
     assert rows[0]["platform"] == "hackernews"
-    assert rows[0]["ok"] is False
+    assert rows[0]["ok"] is True
 
 
 @pytest.mark.asyncio

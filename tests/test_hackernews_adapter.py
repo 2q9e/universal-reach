@@ -155,3 +155,128 @@ async def test_profile_input_is_validated(adapter: HackerNewsAdapter) -> None:
     with pytest.raises(ReachError) as exc_info:
         await adapter.profile("bad/user")
     assert exc_info.value.code == "invalid_input"
+
+
+@pytest.mark.asyncio
+async def test_search_uses_public_algolia_index_and_paginates(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: HackerNewsAdapter,
+) -> None:
+    async def fake_get_json(url: str, **kwargs: object) -> dict[str, object]:
+        assert url == f"{hackernews.SEARCH_BASE}/search_by_date"
+        assert kwargs["allowed_hosts"] == hackernews.SEARCH_HOSTS
+        assert kwargs["params"] == {
+            "query": "rust async",
+            "page": 1,
+            "hitsPerPage": 20,
+            "tags": "story,(ask_hn,show_hn)",
+            "numericFilters": "points>10,created_at_i>=123",
+        }
+        return {
+            "hits": [{
+                "objectID": "456",
+                "_tags": ["story", "author_pg"],
+                "title": "A Rust story",
+                "story_text": "Story body",
+                "url": "https://example.org/rust",
+                "author": "pg",
+                "created_at": "2024-02-03T04:05:06.000Z",
+                "points": 12,
+                "num_comments": 4,
+            }],
+            "nbHits": 120,
+            "nbPages": 6,
+            "hitsPerPage": 20,
+        }
+
+    monkeypatch.setattr(hackernews, "get_json", fake_get_json)
+    page = await adapter.search(
+        " rust async ",
+        limit=20,
+        cursor="1",
+        options={
+            "sort": "recent",
+            "tags": "story,(ask_hn,show_hn)",
+            "numeric_filters": ["points>10", "created_at_i>=123"],
+        },
+    )
+
+    assert page.operation == "search"
+    assert page.pagination.cursor == "2"
+    assert page.pagination.has_more is True
+    assert page.complete is False
+    assert page.extensions["source"] == "hn_search_algolia"
+    assert page.extensions["total_matches"] == 120
+    record = page.items[0]
+    assert record.id == "456"
+    assert record.type == "story"
+    assert record.url == "https://news.ycombinator.com/item?id=456"
+    assert record.title == "A Rust story"
+    assert record.text == "Story body"
+    assert record.metrics == {"score": 12, "descendants": 4}
+    assert record.extensions["external_url"] == "https://example.org/rust"
+    assert record.access.mode == "anonymous"
+
+
+@pytest.mark.asyncio
+async def test_search_normalizes_comment_hits_and_reports_index_cap(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: HackerNewsAdapter,
+) -> None:
+    async def fake_get_json(url: str, **kwargs: object) -> dict[str, object]:
+        return {
+            "hits": [{
+                "objectID": "789",
+                "_tags": ["comment", "author_reader"],
+                "comment_text": "A reply",
+                "story_title": "Parent story",
+                "story_url": "https://example.org/parent",
+                "author": "reader",
+                "created_at": "2025-01-01T00:00:00Z",
+                "story_id": 123,
+                "parent_id": 456,
+                "points": 2,
+            }],
+            "nbHits": 1001,
+            "nbPages": 10,
+            "hitsPerPage": 100,
+        }
+
+    monkeypatch.setattr(hackernews, "get_json", fake_get_json)
+    page = await adapter.search("reply", limit=100)
+
+    assert page.items[0].type == "comment"
+    assert page.items[0].title == "Parent story"
+    assert page.items[0].text == "A reply"
+    assert page.items[0].extensions["story_id"] == "123"
+    assert page.items[0].extensions["parent_id"] == "456"
+    assert page.complete is False
+    assert page.warnings
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query,cursor,options",
+    [
+        ("", None, None),
+        ("x" * 501, None, None),
+        ("topic", "-1", None),
+        ("topic", "1000", None),
+        ("topic", None, {"sort": "popular"}),
+        ("topic", None, {"tags": "story))"}),
+        ("topic", None, {"numeric_filters": "author_pg>5"}),
+    ],
+)
+async def test_search_rejects_invalid_inputs_without_network(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: HackerNewsAdapter,
+    query: str,
+    cursor: str | None,
+    options: dict[str, object] | None,
+) -> None:
+    async def fail_if_called(*args: object, **kwargs: object) -> object:
+        raise AssertionError("network must not be called for invalid search input")
+
+    monkeypatch.setattr(hackernews, "get_json", fail_if_called)
+    with pytest.raises(ReachError):
+        await adapter.search(query, cursor=cursor, options=options)

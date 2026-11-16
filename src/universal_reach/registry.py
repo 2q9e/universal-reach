@@ -22,12 +22,7 @@ class AdapterRegistry:
             self._adapters[adapter.platform] = adapter
 
     def capabilities(self) -> list[dict[str, object]]:
-        return [
-            self._adapters.get(capability.id, None).capability.to_dict()
-            if capability.id in self._adapters
-            else capability.to_dict()
-            for capability in list_capabilities()
-        ]
+        return [self.capability(capability.id).to_dict() for capability in list_capabilities()]
 
     def searchable_platforms(self) -> list[str]:
         return [
@@ -39,10 +34,13 @@ class AdapterRegistry:
         return list(self._adapters)
 
     def capability(self, platform: str) -> PlatformCapability:
+        key = platform.casefold()
         try:
-            return PLATFORM_CATALOG[platform.casefold()]
+            capability = PLATFORM_CATALOG[key]
         except KeyError as exc:
             raise ReachError("unknown_platform", f"Unknown platform: {platform}.", details={"platform": platform}) from exc
+        adapter = self._adapters.get(key)
+        return adapter.capability if adapter else capability
 
     def get(self, platform: str) -> Adapter:
         key = platform.casefold()

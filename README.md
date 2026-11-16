@@ -58,6 +58,7 @@ universal-reach platforms
 universal-reach status --platform bluesky
 universal-reach search --platform bluesky --query "public transit"
 universal-reach search --platform github --query "mcp server"
+universal-reach search --platform hackernews --query "mcp server" --options '{"sort":"recent","tags":"story"}'
 universal-reach search-multi --query "public transit" --platform bluesky --platform github
 universal-reach read --url https://github.com/modelcontextprotocol/python-sdk
 universal-reach replies --url https://news.ycombinator.com/item?id=1 --platform hackernews
@@ -76,6 +77,8 @@ universal-reach search --platform lemmy --query "example" --options '{"instance_
 universal-reach search --platform discourse --query "example" --options '{"instance_url":"https://meta.discourse.org"}'
 universal-reach search --platform steam --query "patch" --options '{"app_id":"489830"}'
 ```
+
+Hacker News search uses the anonymous Algolia HN Search API (`sort` is `relevance` or `recent`; optional `tags` and `numeric_filters` follow the API's documented filters). Its cursor is a zero-based page number, and requests share the service's published limit of 10,000 per IP per hour. Exact reads, replies, and profile data continue to use the official Firebase API.
 
 Owner-authorized Meta reads use environment variables and accept only the configured account:
 
@@ -142,7 +145,7 @@ The table describes operations present in this source release. A check means an 
 | GitHub | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; unauthenticated rate limits apply |
 | Steam Community | Partial | ✓ | — | — | — | — | Partial; searches current per-game announcement RSS entries only; discussions are unsupported |
 | 4chan | Partial | Limited† | ✓ | ✓ | — | — | Yes; public JSON API |
-| Hacker News | Partial | — | ✓ | ✓ | ✓ | ✓ | Yes; official Firebase API |
+| Hacker News | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes; Algolia HN Search plus official Firebase API |
 | XDA Forums | Restricted | — | — | — | — | — | Valnet Terms cover forums/RSS and prohibit automated crawling or content extraction |
 | V2EX | Partial | — | ✓ | ✓ | ✓ | — | Public profile route is anonymous; topic and replies routes require V2EX_ACCESS_TOKEN |
 | Zhihu | Restricted | — | — | — | — | — | Official search requires Access Secret and timestamp; response contract/quota not verified |
@@ -171,7 +174,7 @@ The table describes operations present in this source release. A check means an 
 | Discord | Restricted* | — | ✓ | ✓ | — | — | Bot token, channel allowlist, and permissions required; content may be suppressed without privileged intent |
 | Bluesky | Partial | ✓ | ✓ | ✓ | ✓ | ✓ | Yes through public AppView GET endpoints |
 
-`—` means not implemented, rather than a claim that the platform itself lacks the capability. `*` Discord’s adapter is registered only when `DISCORD_ALLOWED_CHANNEL_IDS` contains one or more channel snowflakes. `†` 4chan search is limited to matching preview text in the active catalog of one explicitly selected board; it is not global full-text search. Hacker News has no search operation in its official Firebase API. Lemmy and Discourse need an instance URL and only return content visible to anonymous visitors. Facebook, Instagram, Threads, and TikTok use owner-authorized APIs and do not provide anonymous access.
+`—` means not implemented, rather than a claim that the platform itself lacks the capability. `*` Discord’s adapter is registered only when `DISCORD_ALLOWED_CHANNEL_IDS` contains one or more channel snowflakes. `†` 4chan search is limited to matching preview text in the active catalog of one explicitly selected board; it is not global full-text search. Hacker News search uses the separate public Algolia HN Search index; exact reads, replies, and profiles use the official Firebase API. Search completeness and availability depend on the index and its published limits. Lemmy and Discourse need an instance URL and only return content visible to anonymous visitors. Facebook, Instagram, Threads, and TikTok use owner-authorized APIs and do not provide anonymous access in this release.
 
 ### Other operations
 
@@ -234,6 +237,7 @@ Adapter routes and access declarations are based on the platforms' published doc
 - [GitHub REST API](https://docs.github.com/en/rest) and [rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
 - [Stack Exchange API v2.3](https://api.stackexchange.com/docs), [compression requirements](https://api.stackexchange.com/docs/compression), and [throttles](https://api.stackexchange.com/docs/throttle)
 - [Hacker News Firebase API](https://github.com/HackerNews/API)
+- [Hacker News Search API](https://hn.algolia.com/api) and [service description](https://hn.algolia.com/about)
 - [4chan API](https://github.com/4chan/4chan-API) and [endpoint rules](https://github.com/4chan/4chan-API/blob/master/pages/Endpoints_and_domains.md)
 - [Lemmy OpenAPI](https://join-lemmy.org/api/main)
 - [Discourse API](https://docs.discourse.org/)
