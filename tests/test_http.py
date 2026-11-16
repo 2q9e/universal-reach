@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import ssl
 import zlib
 from email.message import Message
 from urllib.error import HTTPError
@@ -154,6 +155,8 @@ def test_pinned_https_connection_uses_validated_ip_and_original_tls_host(monkeyp
 
     class FakeContext:
         server_hostname = None
+        verify_mode = ssl.CERT_REQUIRED
+        check_hostname = True
 
         def wrap_socket(self, connection, *, server_hostname):
             self.server_hostname = server_hostname

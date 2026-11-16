@@ -23,7 +23,7 @@ The CLI and stdio MCP server share one `ReachService` and a capability registry.
 
 ## Installation
 
-Requires CPython 3.11 or newer. Python 3.10 reached end of life in October 2026 ([Python version status](https://devguide.python.org/versions/)). The package is pure Python and supports Linux, macOS, and Windows where a compatible Python runtime is available. ARM64 has not been separately release-tested.
+Requires CPython 3.11 or newer. Python 3.10 reached end of life in October 2026 ([Python version status](https://devguide.python.org/versions/)). Universal Reach code is pure Python. CI covers Linux and macOS on x64 and ARM64, and Windows x64; Windows ARM64 is not currently in the CI matrix.
 
 ### Linux and macOS
 
@@ -217,7 +217,7 @@ python -m pip install -e '.[test]'
 python -m pytest
 ```
 
-Tests use deterministic mocked responses and should not require platform accounts or make live requests. GitHub Actions runs CPython 3.11–3.15 on Linux x64, plus Python 3.11 and 3.15 on Linux ARM64, macOS Intel and Apple silicon, and Windows x64 and ARM64.
+Tests use deterministic mocked responses and should not require platform accounts or make live requests. GitHub Actions tests Python 3.11–3.15 on Linux x64; Python 3.11 and 3.15 on Linux ARM64, macOS Intel and Apple silicon, and Windows x64.
 
 ## Known limitations
 
@@ -225,7 +225,7 @@ Tests use deterministic mocked responses and should not require platform account
 - Public endpoints may change, return partial data, enforce rate limits, or deny particular content. Errors preserve those limits instead of retrying indefinitely.
 - Anonymous GitHub and Stack Exchange quotas are limited. Stack Exchange page depth is bounded; GitHub search exposes a bounded result window.
 - 4chan calls are rate-limited in-process and search is board-catalog-only. Discourse and Lemmy depend on the selected instance.
-- The hosted ARM jobs are configured but have not completed yet. Browser automation, authenticated browser sessions, media downloads, transcript extraction, and archive integrations are not included.
+- Windows ARM64 is not covered in CI because the current dependency install falls back to a `cryptography` source build, which requires OpenSSL and Rust on Windows ([installation guide](https://cryptography.io/en/latest/installation/#building-cryptography-on-windows)). Browser automation, authenticated browser sessions, media downloads, transcript extraction, and archive integrations are not included.
 
 ## API references
 
