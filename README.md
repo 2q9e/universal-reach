@@ -2,11 +2,7 @@
 
 [![Tests](https://github.com/2q9e/universal-reach/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/2q9e/universal-reach/actions/workflows/tests.yml)
 
-Universal Reach is a local, read-only CLI and Model Context Protocol (MCP) server for retrieving public content from supported social platforms and online communities. It makes direct requests to documented public APIs; there is no Universal Reach cloud service.
-
-The project catalogs all 35 requested platforms and implements adapters for 20 platform IDs; Discord can be activated separately with an explicit channel allowlist. Some adapters require approved, owner-authorized tokens. The catalog distinguishes working adapters from restricted and not-yet-implemented platforms. It does not claim that a listed platform is fully supported.
-
-Anonymous access means a request works without a user account, API key or token, or browser session cookie. A public API endpoint or feed is valid for this path when it is accessible without those credentials and its published terms permit the use. Separately marked, opt-in authenticated adapters add authorized functionality where a platform does not offer an anonymous route.
+Universal Reach gives a local CLI or MCP host a common interface for reading public posts and discussions from supported services. Platform adapters make requests directly, and the coverage matrix below distinguishes working adapters from cataloged platforms.
 
 ## Architecture
 
